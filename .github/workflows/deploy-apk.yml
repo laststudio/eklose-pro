@@ -178,6 +178,7 @@ jobs:
         with:
           fetch-depth: 0
 
+      # ========== 修改：增加 ONEBOT_* 密钥校验 ==========
       - name: 校验发布密钥
         shell: bash
         run: |
@@ -188,6 +189,9 @@ jobs:
             "GITEE_TOKEN"
             "LANZOU_USERNAME"
             "LANZOU_PASSWORD"
+            "ONEBOT_HTTP_URL"
+            "ONEBOT_GROUP_ID"
+            "ONEBOT_ACCESS_TOKEN"
           )
           for secret_name in "${required_secrets[@]}"; do
             if [ -z "${!secret_name:-}" ]; then
@@ -202,6 +206,9 @@ jobs:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
           LANZOU_USERNAME: ${{ secrets.LANZOU_USERNAME }}
           LANZOU_PASSWORD: ${{ secrets.LANZOU_PASSWORD }}
+          ONEBOT_HTTP_URL: ${{ secrets.ONEBOT_HTTP_URL }}
+          ONEBOT_GROUP_ID: ${{ secrets.ONEBOT_GROUP_ID }}
+          ONEBOT_ACCESS_TOKEN: ${{ secrets.ONEBOT_ACCESS_TOKEN }}
 
       - name: 下载待发布产物
         uses: actions/download-artifact@v4
@@ -282,3 +289,64 @@ jobs:
           GITEE_CONFIG_BRANCH: ${{ vars.GITEE_CONFIG_BRANCH || 'master' }}
           REMOTE_CONFIG_FILE: ${{ vars.REMOTE_CONFIG_FILE || 'eklose_config.json' }}
           REMOTE_CHANGELOG_FILE: ${{ vars.REMOTE_CHANGELOG_FILE || 'eklose_update.md' }}
+
+      # ========== 新增：安装 sshpass（SFTP 密码认证依赖） ==========
+      - name: 安装 sshpass
+        run: sudo apt-get update && sudo apt-get install -y sshpass
+
+      # ========== 新增：上传到服务器 A（密码验证） ==========
+      - name: 上传 APK 到服务器 A (SFTP 密码验证)
+        env:
+          SFTP_HOST_A: ${{ secrets.SFTP_HOST_A }}
+          SFTP_USER_A: ${{ secrets.SFTP_USER_A }}
+          SFTP_PASSWORD_A: ${{ secrets.SFTP_PASSWORD_A }}
+          SFTP_TARGET_DIR_A: ${{ vars.SFTP_TARGET_DIR_A || '/path/to/release' }}
+        run: |
+          set -euo pipefail
+          sshpass -p "$SFTP_PASSWORD_A" sftp -o StrictHostKeyChecking=no -P 22 "$SFTP_USER_A@$SFTP_HOST_A" <<EOF
+          put "${{ steps.artifact.outputs.apk_path }}" "$SFTP_TARGET_DIR_A/${{ needs.build.outputs.apk_name }}"
+          bye
+          EOF
+
+      # ========== 新增：上传到服务器 B（密钥验证） ==========
+      - name: 上传 APK 到服务器 B (SFTP 密钥验证)
+        env:
+          SFTP_HOST_B: ${{ secrets.SFTP_HOST_B }}
+          SFTP_USER_B: ${{ secrets.SFTP_USER_B }}
+          SFTP_PRIVATE_KEY_B: ${{ secrets.SFTP_PRIVATE_KEY_B }}
+          SFTP_TARGET_DIR_B: ${{ vars.SFTP_TARGET_DIR_B || '/path/to/release' }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          echo "$SFTP_PRIVATE_KEY_B" > ~/.ssh/id_rsa_b
+          chmod 600 ~/.ssh/id_rsa_b
+          sftp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa_b -P 22 "$SFTP_USER_B@$SFTP_HOST_B" <<EOF
+          put "${{ steps.artifact.outputs.apk_path }}" "$SFTP_TARGET_DIR_B/${{ needs.build.outputs.apk_name }}"
+          bye
+          EOF
+          rm -f ~/.ssh/id_rsa_b
+
+      # ========== 新增：OneBot 群通知 ==========
+      - name: 发送 OneBot 群通知
+        shell: bash
+        env:
+          ONEBOT_HTTP_URL: ${{ secrets.ONEBOT_HTTP_URL }}
+          ONEBOT_GROUP_ID: ${{ secrets.ONEBOT_GROUP_ID }}
+          ONEBOT_ACCESS_TOKEN: ${{ secrets.ONEBOT_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          {
+            echo "Eklose 新版本发布啦喵~"
+            echo "最新版本为${{ needs.build.outputs.version_name }}"
+            echo "前往网盘下载:oplist.lastudio.cc"
+            echo
+            echo "更新日志:"
+            sed -E '/^##[[:space:]]+/d; /^>[[:space:]]*内部版本号/d; /^[[:space:]]*$/d' current_changelog.md
+          } > onebot_message.txt
+          python scripts/release/notify_onebot.py \
+            --api-url "${ONEBOT_HTTP_URL}" \
+            --group-id "${ONEBOT_GROUP_ID}" \
+            --message-file onebot_message.txt \
+            --upload-file "https://github.com/${{ github.repository }}/releases/download/${{ needs.build.outputs.tag_name }}/${{ needs.build.outputs.apk_name }}" \
+            --upload-name "${{ needs.build.outputs.apk_name }}" \
+            --access-token "${ONEBOT_ACCESS_TOKEN:-}"
