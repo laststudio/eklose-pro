@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: deploy-apk-${{ github.ref }}
@@ -60,7 +60,7 @@ jobs:
         id: download
         shell: bash
         env:
-          UPDATE_DOWNLOAD_URL: ${{ vars.UPDATE_DOWNLOAD_URL || 'https://oplist.lastudio.cc/Eklose_release' }}
+          UPDATE_DOWNLOAD_URL: ${{ vars.UPDATE_DOWNLOAD_URL || 'https://github.com/laststudio/eklose/releases/latest' }}
         run: |
           set -euo pipefail
           apk_url="${UPDATE_DOWNLOAD_URL}"
@@ -81,6 +81,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "缺少 GitHub Secret：ANDROID_KEYSTORE_BASE64。" >&2
+            exit 1
+          fi
           mkdir -p "$RUNNER_TEMP/eklose-signing"
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/eklose-signing/release.keystore"
           echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/eklose-signing/release.keystore" >> "$GITHUB_ENV"
@@ -178,20 +182,17 @@ jobs:
         with:
           fetch-depth: 0
 
-      # ========== 修改：增加 ONEBOT_* 密钥校验 ==========
       - name: 校验发布密钥
         shell: bash
         run: |
           set -euo pipefail
           required_secrets=(
+            "PUBLIC_RELEASE_TOKEN"
             "CONFIG_GITHUB_TOKEN"
             "GITEE_USERNAME"
             "GITEE_TOKEN"
             "LANZOU_USERNAME"
             "LANZOU_PASSWORD"
-            "ONEBOT_HTTP_URL"
-            "ONEBOT_GROUP_ID"
-            "ONEBOT_ACCESS_TOKEN"
           )
           for secret_name in "${required_secrets[@]}"; do
             if [ -z "${!secret_name:-}" ]; then
@@ -201,14 +202,29 @@ jobs:
           done
           echo "发布密钥校验通过。"
         env:
+          PUBLIC_RELEASE_TOKEN: ${{ secrets.PUBLIC_RELEASE_TOKEN }}
           CONFIG_GITHUB_TOKEN: ${{ secrets.CONFIG_GITHUB_TOKEN }}
           GITEE_USERNAME: ${{ secrets.GITEE_USERNAME }}
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
           LANZOU_USERNAME: ${{ secrets.LANZOU_USERNAME }}
           LANZOU_PASSWORD: ${{ secrets.LANZOU_PASSWORD }}
-          ONEBOT_HTTP_URL: ${{ secrets.ONEBOT_HTTP_URL }}
-          ONEBOT_GROUP_ID: ${{ secrets.ONEBOT_GROUP_ID }}
-          ONEBOT_ACCESS_TOKEN: ${{ secrets.ONEBOT_ACCESS_TOKEN }}
+
+      - name: 校验公开仓库发布目标
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.PUBLIC_RELEASE_TOKEN }}
+          TAG_NAME: ${{ needs.build.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          gh repo view laststudio/eklose >/dev/null
+          if gh release view "$TAG_NAME" --repo laststudio/eklose >/dev/null 2>&1; then
+            echo "公开仓库已存在 Release：$TAG_NAME。为避免覆盖现有版本，本次发布已停止。" >&2
+            exit 1
+          fi
+          if gh api "repos/laststudio/eklose/git/ref/tags/$TAG_NAME" >/dev/null 2>&1; then
+            echo "公开仓库已存在标签：$TAG_NAME。为避免覆盖现有版本，本次发布已停止。" >&2
+            exit 1
+          fi
 
       - name: 下载待发布产物
         uses: actions/download-artifact@v4
@@ -257,16 +273,18 @@ jobs:
           LANZOU_FOLDER_NAME: ${{ vars.LANZOU_FOLDER_NAME || 'eklose' }}
 
       - name: 发布 GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ needs.build.outputs.tag_name }}
-          name: Eklose v${{ needs.build.outputs.version_name }}
-          body_path: release_notes.md
-          files: ${{ steps.artifact.outputs.apk_path }}
-          fail_on_unmatched_files: true
-          make_latest: true
+        shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.PUBLIC_RELEASE_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release create "${{ needs.build.outputs.tag_name }}" \
+            "${{ steps.artifact.outputs.apk_path }}" \
+            --repo laststudio/eklose \
+            --target main \
+            --title "Eklose v${{ needs.build.outputs.version_name }}" \
+            --notes-file release_notes.md \
+            --latest
 
       - name: 同步远程配置仓库
         shell: bash
@@ -290,12 +308,18 @@ jobs:
           REMOTE_CONFIG_FILE: ${{ vars.REMOTE_CONFIG_FILE || 'eklose_config.json' }}
           REMOTE_CHANGELOG_FILE: ${{ vars.REMOTE_CHANGELOG_FILE || 'eklose_update.md' }}
 
-      # ========== 新增：安装 sshpass（SFTP 密码认证依赖） ==========
       - name: 安装 sshpass
+        continue-on-error: true
+        if: ${{ secrets.SFTP_HOST_A != '' && secrets.SFTP_USER_A != '' && secrets.SFTP_PASSWORD_A != '' }}
+        env:
+          SFTP_HOST_A: ${{ secrets.SFTP_HOST_A }}
+          SFTP_USER_A: ${{ secrets.SFTP_USER_A }}
+          SFTP_PASSWORD_A: ${{ secrets.SFTP_PASSWORD_A }}
         run: sudo apt-get update && sudo apt-get install -y sshpass
 
-      # ========== 新增：上传到服务器 A（密码验证） ==========
       - name: 上传 APK 到服务器 A (SFTP 密码验证)
+        continue-on-error: true
+        if: ${{ secrets.SFTP_HOST_A != '' && secrets.SFTP_USER_A != '' && secrets.SFTP_PASSWORD_A != '' }}
         env:
           SFTP_HOST_A: ${{ secrets.SFTP_HOST_A }}
           SFTP_USER_A: ${{ secrets.SFTP_USER_A }}
@@ -308,8 +332,9 @@ jobs:
           bye
           EOF
 
-      # ========== 新增：上传到服务器 B（密钥验证） ==========
       - name: 上传 APK 到服务器 B (SFTP 密钥验证)
+        continue-on-error: true
+        if: ${{ secrets.SFTP_HOST_B != '' && secrets.SFTP_USER_B != '' && secrets.SFTP_PRIVATE_KEY_B != '' }}
         env:
           SFTP_HOST_B: ${{ secrets.SFTP_HOST_B }}
           SFTP_USER_B: ${{ secrets.SFTP_USER_B }}
@@ -326,8 +351,9 @@ jobs:
           EOF
           rm -f ~/.ssh/id_rsa_b
 
-      # ========== 新增：OneBot 群通知 ==========
       - name: 发送 OneBot 群通知
+        continue-on-error: true
+        if: ${{ secrets.ONEBOT_HTTP_URL != '' && secrets.ONEBOT_GROUP_ID != '' }}
         shell: bash
         env:
           ONEBOT_HTTP_URL: ${{ secrets.ONEBOT_HTTP_URL }}
@@ -347,6 +373,6 @@ jobs:
             --api-url "${ONEBOT_HTTP_URL}" \
             --group-id "${ONEBOT_GROUP_ID}" \
             --message-file onebot_message.txt \
-            --upload-file "https://github.com/${{ github.repository }}/releases/download/${{ needs.build.outputs.tag_name }}/${{ needs.build.outputs.apk_name }}" \
+            --upload-file "https://github.com/laststudio/eklose/releases/download/${{ needs.build.outputs.tag_name }}/${{ needs.build.outputs.apk_name }}" \
             --upload-name "${{ needs.build.outputs.apk_name }}" \
             --access-token "${ONEBOT_ACCESS_TOKEN:-}"
