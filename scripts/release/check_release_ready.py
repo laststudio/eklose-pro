@@ -17,7 +17,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 
 LATEST_HEADING_PATTERN = re.compile(
-    r"^##\s+(?:\[?v?(?P<version>\d+\.\d+\.\d+)\]?)(?:\s*-\s*(?P<date>\d{4}-\d{2}-\d{2}))?.*$"
+    r"^##\s+(?:\[?v?(?P<version>\d+\.\d+(?:\.\d+)?)\]?)(?:\s*-\s*(?P<date>\d{4}-\d{2}-\d{2}))?.*$"
 )
 VERSION_CODE_PATTERN = re.compile(r"内部版本号[：:]\s*(?P<version_code>\d+)")
 

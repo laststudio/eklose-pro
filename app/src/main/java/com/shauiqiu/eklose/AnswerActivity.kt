@@ -23,7 +23,6 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -135,11 +134,11 @@ private data class AnswerQuestion(
 
 private const val SHARE_FOOTER_TEXT = "翼课校长守护你的答案喵~ 官网:lastudio.cc"
 
-private val loadingAnswerSections = listOf(
+private fun loadingAnswerSections(source: EkwingAnswerSource) = listOf(
     AnswerSection(
         title = "正在读取答案",
         category = "loading",
-        originalText = "正在加载当前考试的题目和答案",
+        originalText = "正在加载${source.contentName()}的题目和答案",
         questions = listOf(
             AnswerQuestion(
                 order = "Q1",
@@ -149,6 +148,10 @@ private val loadingAnswerSections = listOf(
         ),
     )
 )
+
+private fun EkwingAnswerSource.contentName(): String {
+    return if (isHomework) "作业" else "考试"
+}
 
 private fun List<EkwingAnswerSection>.toUiAnswerSections(): List<AnswerSection> {
     return map { section ->
@@ -181,7 +184,7 @@ private fun AnswerScreen(
     val sourceState = states[source] ?: EkwingAnswerSourceState()
     val parseState = sourceState.parseStateByPaperKey[paperKey]
     val loadedSections = sourceState.sectionsByPaperKey[paperKey]?.toUiAnswerSections()
-    val answerSections = loadedSections ?: answerPlaceholderSections(paperKey, parseState)
+    val answerSections = loadedSections ?: answerPlaceholderSections(paperKey, parseState, source)
     val shareableSections = loadedSections.orEmpty().filter(AnswerSection::isShareable)
     val canShareAnswers = shareableSections.isNotEmpty()
     val questionCount = answerSections.sumOf { it.questions.size }
@@ -266,10 +269,10 @@ private fun AnswerScreen(
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 item {
-                    GroupSection(title = "试卷概览") {
+                    GroupSection(title = "${source.contentName()}概览") {
                         GroupItem(
-                            title = paperTitle.ifBlank { "未知试卷" },
-                            summary = paperSummary.ifBlank { "暂无试卷信息" },
+                            title = paperTitle.ifBlank { "未知${source.contentName()}" },
+                            summary = paperSummary.ifBlank { "暂无${source.contentName()}信息" },
                             value = "${answerSections.size} 个分区",
                             showArrow = false,
                         )
@@ -300,11 +303,12 @@ private fun AnswerScreen(
 private fun answerPlaceholderSections(
     paperKey: String,
     parseState: EkwingAnswerParseState?,
+    source: EkwingAnswerSource,
 ): List<AnswerSection> {
     if (paperKey.isBlank()) {
         return listOf(
             EkwingAnswerAssembler.readFailureSection(
-                RuntimeException("未找到考试，请先读取考试列表")
+                RuntimeException("未找到${source.contentName()}，请先读取${source.contentName()}列表")
             )
         ).toUiAnswerSections()
     }
@@ -315,7 +319,7 @@ private fun answerPlaceholderSections(
             )
         ).toUiAnswerSections()
     }
-    return loadingAnswerSections
+    return loadingAnswerSections(source)
 }
 
 private fun AnswerSection.isShareable(): Boolean {
@@ -545,13 +549,11 @@ private fun AnswerSectionBlock(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         SmallTitle(text = section.title)
-        Surface(
+        EkloseCard(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(18.dp),
+            cornerRadius = EkloseCornerRadius.Container,
             color = MiuixTheme.colorScheme.surfaceContainer,
             contentColor = MiuixTheme.colorScheme.onSurfaceContainer,
-            border = BorderStroke(0.6.dp, MiuixTheme.colorScheme.outline.copy(alpha = 0.16f)),
-            shadowElevation = 0.dp,
         ) {
             Column(
                 modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
@@ -688,17 +690,16 @@ private fun InfoPanel(
     content: String,
     emphasized: Boolean = false,
 ) {
-    Surface(
+    EkloseCard(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
+        cornerRadius = EkloseCornerRadius.Nested,
         color = if (emphasized) {
             MiuixTheme.colorScheme.primary.copy(alpha = 0.10f)
         } else {
             MiuixTheme.colorScheme.surface
         },
         contentColor = MiuixTheme.colorScheme.onSurface,
-        border = BorderStroke(0.6.dp, MiuixTheme.colorScheme.outline.copy(alpha = 0.12f)),
-        shadowElevation = 0.dp,
+        borderAlpha = 0.12f,
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),

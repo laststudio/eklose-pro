@@ -250,6 +250,7 @@ object EkwingLoginStore {
     private const val KEY_SAVE_LOGIN = "save_login"
     private const val KEY_BASIC_API = "basic_api"
     private const val KEY_ALL_PAGES = "all_pages"
+    private const val KEY_FLOATING_NAVIGATION_BAR = "floating_navigation_bar"
     private const val KEY_REAL_NAME_ALIAS_FROM = "real_name_alias_from"
     private const val KEY_REAL_NAME_ALIAS_TO = "real_name_alias_to"
 
@@ -367,6 +368,18 @@ object EkwingLoginStore {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
             .putBoolean(KEY_ALL_PAGES, enabled)
+            .apply()
+    }
+
+    fun useFloatingNavigationBar(context: Context): Boolean {
+        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(KEY_FLOATING_NAVIGATION_BAR, false)
+    }
+
+    fun setUseFloatingNavigationBar(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_FLOATING_NAVIGATION_BAR, enabled)
             .apply()
     }
 

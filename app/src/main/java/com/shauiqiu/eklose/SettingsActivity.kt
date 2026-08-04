@@ -51,6 +51,9 @@ private fun SettingsScreen(onBack: () -> Unit) {
     var saveLogin by rememberSaveable { mutableStateOf(EkwingLoginStore.shouldSaveLogin(context)) }
     var basicApi by rememberSaveable { mutableStateOf(EkwingLoginStore.useBasicApi(context)) }
     var allPages by rememberSaveable { mutableStateOf(EkwingLoginStore.loadAllPages(context)) }
+    var floatingNavigationBar by rememberSaveable {
+        mutableStateOf(EkwingLoginStore.useFloatingNavigationBar(context))
+    }
     val initialAlias = rememberSaveable { EkwingLoginStore.loadRealNameAlias(context) }
     var aliasFrom by rememberSaveable { mutableStateOf(initialAlias.first) }
     var aliasTo by rememberSaveable { mutableStateOf(initialAlias.second) }
@@ -81,7 +84,7 @@ private fun SettingsScreen(onBack: () -> Unit) {
                 item {
                     PageLead(
                         title = "设置",
-                        summary = "管理登录缓存和考试列表",
+                        summary = "管理登录缓存和任务列表",
                     )
                 }
                 item {
@@ -115,8 +118,8 @@ private fun SettingsScreen(onBack: () -> Unit) {
                         )
                         GroupDivider()
                         GroupItem(
-                            title = "Basic 成绩接口",
-                            summary = "当列表 URL 指向 basic scoreinfo 时自动启用",
+                            title = "Basic 接口",
+                            summary = "优先使用 Basic 账号对应的列表、详情和成绩接口",
                             trailing = {
                                 Switch(
                                     checked = basicApi,
@@ -129,14 +132,31 @@ private fun SettingsScreen(onBack: () -> Unit) {
                         )
                         GroupDivider()
                         GroupItem(
-                            title = "历史考试全分页",
-                            summary = "读取 study-center-history 的所有分页",
+                            title = "历史考试和常规作业全分页",
+                            summary = "读取历史考试和常规作业的所有分页",
                             trailing = {
                                 Switch(
                                     checked = allPages,
                                     onCheckedChange = {
                                         allPages = it
                                         EkwingLoginStore.setLoadAllPages(context, it)
+                                    },
+                                )
+                            },
+                        )
+                    }
+                }
+                item {
+                    GroupSection(title = "界面") {
+                        GroupItem(
+                            title = "悬浮导航栏",
+                            summary = "将底部导航栏显示为悬浮样式",
+                            trailing = {
+                                Switch(
+                                    checked = floatingNavigationBar,
+                                    onCheckedChange = {
+                                        floatingNavigationBar = it
+                                        EkwingLoginStore.setUseFloatingNavigationBar(context, it)
                                     },
                                 )
                             },
@@ -188,7 +208,6 @@ private fun RealNameAliasDialog(
                 modifier = Modifier.fillMaxWidth(),
                 label = "输入姓名",
                 singleLine = true,
-                cornerRadius = 16.dp,
             )
             TextField(
                 value = toName,
@@ -196,7 +215,6 @@ private fun RealNameAliasDialog(
                 modifier = Modifier.fillMaxWidth(),
                 label = "实际登录姓名",
                 singleLine = true,
-                cornerRadius = 16.dp,
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),

@@ -1,6 +1,5 @@
 package com.shauiqiu.eklose
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -10,15 +9,17 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
+import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
@@ -28,7 +29,14 @@ import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.basic.ArrowRight
+import top.yukonga.miuix.kmp.squircle.squircleBorder
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+
+internal object EkloseCornerRadius {
+    val Container = 18.dp
+    val Item = 16.dp
+    val Nested = 12.dp
+}
 
 @Composable
 fun EkloseTopBar(
@@ -65,17 +73,35 @@ fun GroupSection(
         if (title != null) {
             SmallTitle(text = title)
         }
-        Surface(
+        EkloseCard(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(18.dp),
-            color = MiuixTheme.colorScheme.surfaceContainer,
-            contentColor = MiuixTheme.colorScheme.onSurfaceContainer,
-            border = BorderStroke(0.6.dp, MiuixTheme.colorScheme.outline.copy(alpha = 0.16f)),
-            shadowElevation = 0.dp,
-        ) {
-            Column(content = content)
-        }
+            content = content,
+        )
     }
+}
+
+@Composable
+internal fun EkloseCard(
+    modifier: Modifier = Modifier,
+    cornerRadius: Dp = EkloseCornerRadius.Container,
+    color: Color = MiuixTheme.colorScheme.surfaceContainer,
+    contentColor: Color = MiuixTheme.colorScheme.onSurfaceContainer,
+    borderAlpha: Float = 0.16f,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Card(
+        modifier = modifier.squircleBorder(
+            width = 0.6.dp,
+            color = MiuixTheme.colorScheme.outline.copy(alpha = borderAlpha),
+            cornerRadius = cornerRadius,
+        ),
+        cornerRadius = cornerRadius,
+        colors = CardDefaults.defaultColors(
+            color = color,
+            contentColor = contentColor,
+        ),
+        content = content,
+    )
 }
 
 @Composable
@@ -136,7 +162,6 @@ fun PageLead(
     Surface(
         modifier = modifier
             .fillMaxWidth(),
-        shape = RoundedCornerShape(0.dp),
         color = Color.Transparent,
         contentColor = MiuixTheme.colorScheme.onSurface,
     ) {

@@ -70,7 +70,15 @@ enum class EkwingAnswerSource(
     val cacheKey: String,
 ) {
     Current("current"),
-    History("history");
+    History("history"),
+    HomeworkCurrent("homework_current"),
+    HomeworkHistory("homework_history");
+
+    val isHomework: Boolean
+        get() = this == HomeworkCurrent || this == HomeworkHistory
+
+    val isHistory: Boolean
+        get() = this == History || this == HomeworkHistory
 }
 
 enum class EkwingAnswerParseStatus {
@@ -98,10 +106,7 @@ internal fun canOpenPaper(parseState: EkwingAnswerParseState?): Boolean {
 
 object EkwingAnswerState {
     private val stateFlow = MutableStateFlow(
-        mapOf(
-            EkwingAnswerSource.Current to EkwingAnswerSourceState(),
-            EkwingAnswerSource.History to EkwingAnswerSourceState(),
-        )
+        emptySourceStates()
     )
 
     val states: StateFlow<Map<EkwingAnswerSource, EkwingAnswerSourceState>> = stateFlow.asStateFlow()
@@ -141,10 +146,11 @@ object EkwingAnswerState {
     }
 
     fun clear() {
-        stateFlow.value = mapOf(
-            EkwingAnswerSource.Current to EkwingAnswerSourceState(),
-            EkwingAnswerSource.History to EkwingAnswerSourceState(),
-        )
+        stateFlow.value = emptySourceStates()
+    }
+
+    private fun emptySourceStates(): Map<EkwingAnswerSource, EkwingAnswerSourceState> {
+        return EkwingAnswerSource.entries.associateWith { EkwingAnswerSourceState() }
     }
 }
 
@@ -267,10 +273,18 @@ object EkwingAnswerPrefetchManager {
             return
         }
 
+        val parseState = if (sections.any { it.category == "error" }) {
+            EkwingAnswerParseState(
+                status = EkwingAnswerParseStatus.Failed,
+                errorMessage = sections.firstOrNull()?.questions?.firstOrNull()?.answer,
+            )
+        } else {
+            EkwingAnswerParseState(EkwingAnswerParseStatus.Ready)
+        }
         EkwingAnswerState.updateSource(source) {
             it.copy(
                 sectionsByPaperKey = it.sectionsByPaperKey + (paperKey to sections),
-                parseStateByPaperKey = it.parseStateByPaperKey + (paperKey to EkwingAnswerParseState(EkwingAnswerParseStatus.Ready)),
+                parseStateByPaperKey = it.parseStateByPaperKey + (paperKey to parseState),
             )
         }
         EkwingAnswerCacheStore.saveSourceState(context, source, EkwingAnswerState.sourceState(source))
@@ -395,24 +409,41 @@ private fun JSONObject?.toStringMap(): Map<String, String> {
 }
 
 class EkwingAnswerReader(private val context: Context) {
-    fun readPapers(history: Boolean): List<EkwingAnswerPaper> {
-        val source = if (history) EkwingAnswerSource.History else EkwingAnswerSource.Current
+    fun readPapers(source: EkwingAnswerSource): List<EkwingAnswerPaper> {
+        val history = source.isHistory
+        val isHomework = source.isHomework
         val session = EkwingLoginStore.loadSession(context)
             ?: reloginWithSavedIdentity()
             ?: throw RuntimeException("请先登录翼课账号")
 
         val useBasic = EkwingLoginStore.useBasicApi(context)
-        val taskList = getExamList(
-            session = session,
-            useBasic = useBasic,
-            history = history,
-            allPages = EkwingLoginStore.loadAllPages(context),
-        )
-        val allItems = taskList.tasks.distinctBy { it.answerPaperKey() }
-        val papers = allItems.mapIndexed { index, exam -> exam.toAnswerPaper(index) }
+        val taskList = if (isHomework) {
+            getHomeworkList(
+                session = session,
+                useBasic = useBasic,
+                history = history,
+                allPages = EkwingLoginStore.loadAllPages(context),
+            )
+        } else {
+            getExamList(
+                session = session,
+                useBasic = useBasic,
+                history = history,
+                allPages = EkwingLoginStore.loadAllPages(context),
+            )
+        }
+        val allItems = taskList.tasks.distinctBy {
+            if (isHomework) it.homeworkAnswerPaperKey() else it.answerPaperKey()
+        }
+        val papers = allItems.mapIndexed { index, task ->
+            if (isHomework) task.toHomeworkAnswerPaper(index) else task.toAnswerPaper(index)
+        }
 
         val oldState = EkwingAnswerState.sourceState(source)
-        val taskByPaperKey = allItems.associate { exam -> exam.answerPaperKey() to exam.toString() }
+        val taskByPaperKey = allItems.associate { task ->
+            val key = if (isHomework) task.homeworkAnswerPaperKey() else task.answerPaperKey()
+            key to task.toString()
+        }
         val paperKeys = papers.map { it.key }.toSet()
         val sectionsByPaperKey = oldState.sectionsByPaperKey.filterKeys { it in paperKeys }
         val parseStateByPaperKey = papers.associate { paper ->
@@ -437,6 +468,11 @@ class EkwingAnswerReader(private val context: Context) {
         return papers
     }
 
+    fun readPapers(history: Boolean): List<EkwingAnswerPaper> {
+        val source = if (history) EkwingAnswerSource.History else EkwingAnswerSource.Current
+        return readPapers(source)
+    }
+
     fun readAnswerSections(paperKey: String): List<EkwingAnswerSection> {
         return readAnswerSections(EkwingAnswerSource.Current, paperKey)
     }
@@ -449,15 +485,15 @@ class EkwingAnswerReader(private val context: Context) {
         if (cachedSections != null) return cachedSections
 
         val examText = EkwingAnswerState.sourceState(source).taskByPaperKey[paperKey]
-            ?: throw RuntimeException("未找到考试，请先读取考试列表")
-        val exam = runCatching { JSONObject(examText) }
-            .getOrElse { throw RuntimeException("考试缓存无效，请重新读取列表") }
+            ?: throw RuntimeException("未找到任务，请先读取任务列表")
+        val task = runCatching { JSONObject(examText) }
+            .getOrElse { throw RuntimeException("任务缓存无效，请重新读取列表") }
         val session = EkwingLoginStore.loadSession(context)
             ?: reloginWithSavedIdentity()
             ?: throw RuntimeException("请先登录翼课账号")
         val useBasic = EkwingLoginStore.useBasicApi(context)
         val sections = runCatching {
-            readExamSections(session, exam, useBasic)
+            if (source.isHomework) readHomeworkSections(session, task, useBasic) else readExamSections(session, task, useBasic)
         }.getOrElse { error ->
             listOf(EkwingAnswerAssembler.readFailureSection(error))
         }
@@ -477,6 +513,59 @@ class EkwingAnswerReader(private val context: Context) {
         }
         EkwingAnswerCacheStore.saveSourceState(context, source, EkwingAnswerState.sourceState(source))
         return sections
+    }
+
+    private fun getHomeworkList(
+        session: EkwingLoginSession,
+        useBasic: Boolean,
+        history: Boolean,
+        allPages: Boolean,
+    ): EkwingTaskList {
+        var actualSession = session
+        val data = runCatching {
+            getHomeworkListData(actualSession, useBasic, history, allPages)
+        }.recoverCatching { error ->
+            val refreshedSession = reloginWithSavedIdentity() ?: throw error
+            actualSession = EkwingSessionRefreshPlanner.actualSession(actualSession, refreshedSession)
+            getHomeworkListData(refreshedSession, useBasic, history, allPages)
+        }.getOrThrow()
+        return EkwingTaskList(actualSession, EkwingTaskListParser.homeworkListTasks(data))
+    }
+
+    private fun getHomeworkListData(
+        session: EkwingLoginSession,
+        useBasic: Boolean,
+        history: Boolean,
+        allPages: Boolean,
+    ): Any? {
+        val paths = EkwingHomeworkApiPlanner.homeworkListPaths(useBasic)
+        fun requestPage(page: Int, archiveId: String? = null): Any? {
+            return requestFirstSuccessful(paths) { path ->
+                val request = EkwingHomeworkRequestPlanner.homeworkListRequest(
+                    history = history,
+                    page = page,
+                    archiveId = archiveId,
+                    commonParams = commonParams(session),
+                )
+                postForm(path, request.payload).opt("data")
+            }
+        }
+
+        val firstPage = requestPage(1)
+        if (!allPages) return firstPage
+
+        val items = EkwingTaskListParser.homeworkListTasks(firstPage).toMutableList()
+        val pageInfo = EkwingHomeworkDetailParser.pageInfo(firstPage)
+        var current = pageInfo?.optInt("currentPage", 1) ?: 1
+        val total = pageInfo?.optInt("totalPage", current) ?: current
+        while (current < total && items.isNotEmpty()) {
+            val archiveId = lastArchiveId(items)
+            current += 1
+            val nextItems = EkwingTaskListParser.homeworkListTasks(requestPage(current, archiveId))
+            if (nextItems.isEmpty()) break
+            items += nextItems
+        }
+        return JSONArray().apply { items.forEach(::put) }
     }
 
     private fun getExamList(
@@ -2317,6 +2406,46 @@ private fun JSONObject.toAnswerPaper(index: Int): EkwingAnswerPaper {
     )
 }
 
+internal fun JSONObject.toHomeworkAnswerPaper(index: Int): EkwingAnswerPaper {
+    val title = firstNonBlank(
+        optString("title"),
+        optString("hw_name"),
+        optString("name"),
+        "作业 ${index + 1}",
+    ) ?: "作业 ${index + 1}"
+    val total = firstNonBlank(
+        optString("cntTotal"),
+        optString("total_num"),
+        optString("question_num"),
+        optString("ques_num"),
+        optString("num"),
+    )
+    val finished = firstNonBlank(
+        optString("finishCntNum"),
+        optString("finish_num"),
+        optString("finished_num"),
+        optString("done_num"),
+    )
+    val score = firstNonBlank(optString("score"), optString("self_score"), optString("total_score"))
+    val status = firstNonBlank(optString("status"), optString("self_status"), optString("state"))
+    val summaryParts = listOfNotNull(
+        "常规作业",
+        total?.let { "$it 题" },
+        when {
+            !finished.isNullOrBlank() && !total.isNullOrBlank() -> "完成 $finished/$total"
+            !finished.isNullOrBlank() -> "完成 $finished"
+            else -> null
+        },
+        score?.let { "分数 $it" },
+        status?.let { "状态 ${homeworkStatusText(it)}" },
+    )
+    return EkwingAnswerPaper(
+        key = homeworkAnswerPaperKey(),
+        title = title,
+        summary = summaryParts.joinToString(" | ").ifBlank { "常规作业" },
+    )
+}
+
 internal fun examStatusText(status: String): String {
     return when (status.trim()) {
         "1" -> "已完成"
@@ -2336,6 +2465,27 @@ private fun JSONObject.answerPaperKey(): String {
         optString("title"),
     ) ?: toString()
     return "$type:$id"
+}
+
+private fun JSONObject.homeworkAnswerPaperKey(): String {
+    val id = firstNonBlank(
+        optString("hid"),
+        optString("hw_id"),
+        optString("id"),
+        optString("record_id"),
+        firstQueryParam("hid", "hw_id", "id"),
+        optString("title"),
+    ) ?: toString()
+    return "hw:$id"
+}
+
+private fun homeworkStatusText(status: String): String {
+    return when (status.trim()) {
+        "0" -> "未完成"
+        "1" -> "已完成"
+        "2" -> "未完成"
+        else -> status
+    }
 }
 
 private fun examSelfId(exam: JSONObject): String? {

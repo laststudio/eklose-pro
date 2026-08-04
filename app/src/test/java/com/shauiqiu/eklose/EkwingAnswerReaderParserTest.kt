@@ -1032,6 +1032,32 @@ class EkwingAnswerReaderParserTest {
     }
 
     @Test
+    fun answerStateKeepsAllFourSourcesSeparate() {
+        EkwingAnswerState.clear()
+        val expectedTitles = mapOf(
+            EkwingAnswerSource.Current to "当前考试",
+            EkwingAnswerSource.History to "历史考试",
+            EkwingAnswerSource.HomeworkCurrent to "当前作业",
+            EkwingAnswerSource.HomeworkHistory to "历史作业",
+        )
+
+        expectedTitles.forEach { (source, title) ->
+            EkwingAnswerState.setSourceState(
+                source,
+                EkwingAnswerSourceState(papers = listOf(EkwingAnswerPaper(source.cacheKey, title, "summary"))),
+            )
+        }
+
+        assertEquals(
+            expectedTitles,
+            EkwingAnswerSource.entries.associateWith { source ->
+                EkwingAnswerState.sourceState(source).papers.single().title
+            },
+        )
+        EkwingAnswerState.clear()
+    }
+
+    @Test
     fun answerStateClearRemovesAllSources() {
         EkwingAnswerState.setSourceState(
             EkwingAnswerSource.Current,
@@ -1046,6 +1072,8 @@ class EkwingAnswerReaderParserTest {
 
         assertEquals(emptyList<EkwingAnswerPaper>(), EkwingAnswerState.sourceState(EkwingAnswerSource.Current).papers)
         assertEquals(emptyList<EkwingAnswerPaper>(), EkwingAnswerState.sourceState(EkwingAnswerSource.History).papers)
+        assertEquals(emptyList<EkwingAnswerPaper>(), EkwingAnswerState.sourceState(EkwingAnswerSource.HomeworkCurrent).papers)
+        assertEquals(emptyList<EkwingAnswerPaper>(), EkwingAnswerState.sourceState(EkwingAnswerSource.HomeworkHistory).papers)
     }
 
     @Test
@@ -1402,6 +1430,40 @@ class EkwingAnswerReaderParserTest {
             listOf("/student/Hw/getBasicList", "/student/Hw/getList"),
             EkwingHomeworkApiPlanner.homeworkListPaths(useBasic = true),
         )
+    }
+
+    @Test
+    fun homeworkSourcesUseIndependentCacheKeysAndHistoryFlags() {
+        assertEquals("current", EkwingAnswerSource.Current.cacheKey)
+        assertEquals("history", EkwingAnswerSource.History.cacheKey)
+        assertEquals("homework_current", EkwingAnswerSource.HomeworkCurrent.cacheKey)
+        assertEquals("homework_history", EkwingAnswerSource.HomeworkHistory.cacheKey)
+        assertEquals(false, EkwingAnswerSource.Current.isHomework)
+        assertEquals(false, EkwingAnswerSource.History.isHomework)
+        assertEquals(true, EkwingAnswerSource.HomeworkCurrent.isHomework)
+        assertEquals(true, EkwingAnswerSource.HomeworkHistory.isHomework)
+        assertEquals(false, EkwingAnswerSource.HomeworkCurrent.isHistory)
+        assertEquals(true, EkwingAnswerSource.HomeworkHistory.isHistory)
+    }
+
+    @Test
+    fun homeworkPaperUsesHidAndRegularHomeworkSummary() {
+        val paper = JSONObject(
+            """
+            {
+              "hid": "homework-100",
+              "title": "暑假英语作业",
+              "cntTotal": 10,
+              "finishCntNum": 4,
+              "score": 80,
+              "status": 1
+            }
+            """.trimIndent()
+        ).toHomeworkAnswerPaper(0)
+
+        assertEquals("hw:homework-100", paper.key)
+        assertEquals("暑假英语作业", paper.title)
+        assertEquals("常规作业 | 10 题 | 完成 4/10 | 分数 80 | 状态 已完成", paper.summary)
     }
 
     @Test

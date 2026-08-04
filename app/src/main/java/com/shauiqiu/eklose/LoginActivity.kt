@@ -4,14 +4,21 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.Composable
@@ -98,6 +105,7 @@ private fun LoginScreen(
     var isBusy by rememberSaveable { mutableStateOf(false) }
     var statusText by rememberSaveable { mutableStateOf("请输入登录信息") }
     var schools by remember { mutableStateOf<List<EkwingSchool>>(emptyList()) }
+    var showSchoolResults by remember { mutableStateOf(false) }
     var pendingOvername by remember { mutableStateOf<EkwingOvernameRequired?>(null) }
 
     LaunchedEffect(Unit) {
@@ -159,156 +167,178 @@ private fun LoginScreen(
                 }
                 item {
                     GroupSection(title = "信息") {
-                        if (mode == LoginMode.Account) {
-                            LoginField(username, { username = it }, "账号")
-                        } else {
-                            LoginField(
-                                value = schoolKeyword,
-                                onValueChange = {
-                                    schoolKeyword = it
-                                    schoolName = ""
-                                    schoolId = ""
-                                    schools = emptyList()
-                                },
-                                label = "学校关键字",
-                                trailing = {
-                                    IconButton(
-                                        onClick = {
-                                            if (schoolKeyword.isBlank()) {
-                                                statusText = "请先输入学校关键字"
-                                                return@IconButton
-                                            }
-                                            isBusy = true
-                                            statusText = "正在搜索学校..."
-                                            coroutineScope.launch {
-                                                runCatching {
-                                                    withContext(Dispatchers.IO) {
-                                                        client.searchSchools(schoolKeyword.trim())
-                                                    }
-                                                }.onSuccess { result ->
-                                                    schools = result
-                                                    statusText = if (result.isEmpty()) {
-                                                        "未搜索到学校"
-                                                    } else {
-                                                        "请选择学校"
-                                                    }
-                                                }.onFailure { error ->
-                                                    statusText = "搜索学校失败：${error.message}"
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            if (mode == LoginMode.Account) {
+                                LoginField(username, { username = it }, "账号")
+                            } else {
+                                LoginField(
+                                    value = schoolKeyword,
+                                    onValueChange = {
+                                        schoolKeyword = it
+                                        schoolName = ""
+                                        schoolId = ""
+                                        showSchoolResults = false
+                                    },
+                                    label = "学校关键字",
+                                    trailing = {
+                                        IconButton(
+                                            onClick = {
+                                                if (schoolKeyword.isBlank()) {
+                                                    statusText = "请先输入学校关键字"
+                                                    return@IconButton
                                                 }
-                                                isBusy = false
-                                            }
-                                        },
-                                    ) {
-                                        Icon(
-                                            imageVector = MiuixIcons.Basic.Search,
-                                            contentDescription = "搜索学校",
-                                            tint = MiuixTheme.colorScheme.primary,
-                                        )
-                                    }
-                                },
-                            )
-                            GroupDivider()
-                            LoginField(name, { name = it }, "学生姓名")
-                        }
-                        GroupDivider()
-                        LoginField(password, { password = it }, "密码", password = true)
-                    }
-                }
-                if (mode == LoginMode.RealName && schools.isNotEmpty()) {
-                    item {
-                        GroupSection(title = "学校搜索结果") {
-                            schools.forEachIndexed { index, school ->
-                                RadioButtonPreference(
-                                    title = school.schoolName,
-                                    summary = listOf(
-                                        "id=${school.schoolId}",
-                                        school.zone,
-                                    ).filter { it.isNotBlank() }.joinToString(" · "),
-                                    selected = schoolId == school.schoolId,
-                                    onClick = {
-                                        schoolName = school.schoolName
-                                        schoolId = school.schoolId
-                                        schoolKeyword = school.schoolName
-                                        statusText = "已选择学校：${school.schoolName}"
+                                                isBusy = true
+                                                statusText = "正在搜索学校..."
+                                                coroutineScope.launch {
+                                                    runCatching {
+                                                        withContext(Dispatchers.IO) {
+                                                            client.searchSchools(schoolKeyword.trim())
+                                                        }
+                                                    }.onSuccess { result ->
+                                                        if (result.isNotEmpty()) {
+                                                            schools = result
+                                                        }
+                                                        showSchoolResults = result.isNotEmpty()
+                                                        statusText = if (result.isEmpty()) {
+                                                            "未搜索到学校"
+                                                        } else {
+                                                            "请选择学校"
+                                                        }
+                                                    }.onFailure { error ->
+                                                        statusText = "搜索学校失败：${error.message}"
+                                                    }
+                                                    isBusy = false
+                                                }
+                                            },
+                                        ) {
+                                            Icon(
+                                                imageVector = MiuixIcons.Basic.Search,
+                                                contentDescription = "搜索学校",
+                                                tint = MiuixTheme.colorScheme.primary,
+                                            )
+                                        }
                                     },
                                 )
-                                if (index != schools.lastIndex) {
-                                    GroupDivider()
-                                }
+                                LoginField(name, { name = it }, "学生姓名")
                             }
+                            LoginField(password, { password = it }, "密码", password = true)
                         }
                     }
                 }
                 item {
-                    GroupSection {
-                        TextButton(
-                            text = if (isBusy) "处理中..." else mode.title,
-                            onClick = {
-                                if (isBusy) return@TextButton
-                                val validationError = validateLoginInput(
-                                    mode = mode,
-                                    username = username,
-                                    password = password,
-                                    name = name,
-                                    schoolName = schoolName,
-                                    schoolId = schoolId,
-                                )
-                                if (validationError != null) {
-                                    statusText = validationError
-                                    return@TextButton
-                                }
-
-                                isBusy = true
-                                statusText = "正在登录..."
-                                coroutineScope.launch {
-                                    runCatching {
-                                        withContext(Dispatchers.IO) {
-                                            when (mode) {
-                                                LoginMode.Account -> client.loginByAccount(
-                                                    username = username.trim(),
-                                                    password = password,
-                                                )
-                                                LoginMode.RealName -> client.loginByRealName(
-                                                    name = EkwingLoginStore.resolveRealName(context, name),
-                                                    password = password,
-                                                    schoolName = schoolName.trim(),
-                                                    schoolId = schoolId.trim(),
-                                                )
-                                            }
-                                        }
-                                    }.onSuccess { result ->
-                                        saveLoginResult(
-                                            context = context,
-                                            result = result,
-                                            mode = mode,
-                                            username = username,
-                                            password = password,
-                                            name = name,
-                                            schoolName = schoolName,
-                                            schoolId = schoolId,
+                    Column {
+                        AnimatedVisibility(
+                            visible = mode == LoginMode.RealName && showSchoolResults,
+                            enter = fadeIn(animationSpec = tween(durationMillis = 180)) +
+                                expandVertically(
+                                    animationSpec = tween(durationMillis = 260),
+                                    expandFrom = Alignment.Top,
+                                ),
+                            exit = fadeOut(animationSpec = tween(durationMillis = 140)) +
+                                shrinkVertically(
+                                    animationSpec = tween(durationMillis = 220),
+                                    shrinkTowards = Alignment.Top,
+                                ),
+                            label = "SchoolResultsVisibility",
+                        ) {
+                            Column {
+                                GroupSection(title = "学校搜索结果") {
+                                    schools.forEachIndexed { index, school ->
+                                        RadioButtonPreference(
+                                            title = school.schoolName,
+                                            summary = listOf(
+                                                "id=${school.schoolId}",
+                                                school.zone,
+                                            ).filter { it.isNotBlank() }.joinToString(" · "),
+                                            selected = schoolId == school.schoolId,
+                                            onClick = {
+                                                schoolName = school.schoolName
+                                                schoolId = school.schoolId
+                                                schoolKeyword = school.schoolName
+                                                statusText = "已选择学校：${school.schoolName}"
+                                            },
                                         )
-                                        statusText = "登录成功：uid=${result.uid}"
-                                        password = ""
-                                        onLoginSuccess()
-                                    }.onFailure { error ->
-                                        if (error is EkwingOvernameRequired) {
-                                            pendingOvername = error
-                                            statusText = "请选择同名账号"
-                                        } else {
-                                            statusText = "登录失败：${error.message}"
+                                        if (index != schools.lastIndex) {
+                                            GroupDivider()
                                         }
                                     }
-                                    isBusy = false
                                 }
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 18.dp, vertical = 12.dp),
-                            colors = ButtonDefaults.textButtonColors(
-                                color = MiuixTheme.colorScheme.primary,
-                                textColor = MiuixTheme.colorScheme.onPrimary,
-                            ),
-                        )
+                                Spacer(modifier = Modifier.height(14.dp))
+                            }
+                        }
+                        GroupSection {
+                            TextButton(
+                                text = if (isBusy) "处理中..." else mode.title,
+                                onClick = {
+                                    if (isBusy) return@TextButton
+                                    val validationError = validateLoginInput(
+                                        mode = mode,
+                                        username = username,
+                                        password = password,
+                                        name = name,
+                                        schoolName = schoolName,
+                                        schoolId = schoolId,
+                                    )
+                                    if (validationError != null) {
+                                        statusText = validationError
+                                        return@TextButton
+                                    }
+
+                                    isBusy = true
+                                    statusText = "正在登录..."
+                                    coroutineScope.launch {
+                                        runCatching {
+                                            withContext(Dispatchers.IO) {
+                                                when (mode) {
+                                                    LoginMode.Account -> client.loginByAccount(
+                                                        username = username.trim(),
+                                                        password = password,
+                                                    )
+                                                    LoginMode.RealName -> client.loginByRealName(
+                                                        name = EkwingLoginStore.resolveRealName(context, name),
+                                                        password = password,
+                                                        schoolName = schoolName.trim(),
+                                                        schoolId = schoolId.trim(),
+                                                    )
+                                                }
+                                            }
+                                        }.onSuccess { result ->
+                                            saveLoginResult(
+                                                context = context,
+                                                result = result,
+                                                mode = mode,
+                                                username = username,
+                                                password = password,
+                                                name = name,
+                                                schoolName = schoolName,
+                                                schoolId = schoolId,
+                                            )
+                                            statusText = "登录成功：uid=${result.uid}"
+                                            password = ""
+                                            onLoginSuccess()
+                                        }.onFailure { error ->
+                                            if (error is EkwingOvernameRequired) {
+                                                pendingOvername = error
+                                                statusText = "请选择同名账号"
+                                            } else {
+                                                statusText = "登录失败：${error.message}"
+                                            }
+                                        }
+                                        isBusy = false
+                                    }
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                colors = ButtonDefaults.textButtonColors(
+                                    color = MiuixTheme.colorScheme.primary,
+                                    textColor = MiuixTheme.colorScheme.onPrimary,
+                                ),
+                            )
+                        }
                     }
                 }
             }
@@ -364,12 +394,9 @@ private fun LoginField(
     TextField(
         value = value,
         onValueChange = onValueChange,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 18.dp, vertical = 8.dp),
+        modifier = Modifier.fillMaxWidth(),
         label = label,
         singleLine = true,
-        cornerRadius = 16.dp,
         visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
         trailingIcon = trailing,
     )
@@ -400,13 +427,14 @@ private fun OvernameBottomSheet(
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
             pendingOvername?.accounts?.forEach { account ->
-                Surface(
+                EkloseCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 18.dp),
+                    cornerRadius = EkloseCornerRadius.Item,
                     color = MiuixTheme.colorScheme.surfaceContainer,
                     contentColor = MiuixTheme.colorScheme.onSurfaceContainer,
-                    border = BorderStroke(0.6.dp, MiuixTheme.colorScheme.outline.copy(alpha = 0.12f)),
+                    borderAlpha = 0.12f,
                 ) {
                     BasicComponent(
                         title = account.username,

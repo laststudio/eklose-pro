@@ -58,6 +58,8 @@ import kotlinx.coroutines.withContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.FloatingToolbar
+import top.yukonga.miuix.kmp.basic.FloatingNavigationBar
+import top.yukonga.miuix.kmp.basic.FloatingNavigationBarItem
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
@@ -134,16 +136,36 @@ private enum class HomeworkScope(
     val label: String,
     val readerSummary: String,
     val answerSource: EkwingAnswerSource,
+    val contentName: String,
+    val listName: String,
 ) {
-    Current(
+    CurrentExam(
         label = "当前学习中心考试任务",
         readerSummary = "读取当前学习中心考试任务，进入考试后再读取答案",
         answerSource = EkwingAnswerSource.Current,
+        contentName = "考试",
+        listName = "试卷",
     ),
-    History(
+    HistoryExam(
         label = "历史学习中心考试任务",
         readerSummary = "读取历史学习中心考试任务，进入考试后再读取答案",
         answerSource = EkwingAnswerSource.History,
+        contentName = "考试",
+        listName = "试卷",
+    ),
+    CurrentHomework(
+        label = "当前作业",
+        readerSummary = "读取当前常规作业，进入作业后再读取答案",
+        answerSource = EkwingAnswerSource.HomeworkCurrent,
+        contentName = "作业",
+        listName = "作业",
+    ),
+    HistoryHomework(
+        label = "历史作业",
+        readerSummary = "读取历史常规作业，进入作业后再读取答案",
+        answerSource = EkwingAnswerSource.HomeworkHistory,
+        contentName = "作业",
+        listName = "作业",
     ),
 }
 
@@ -157,19 +179,33 @@ private data class RemoteDialogState(
 
 @Composable
 private fun EkloseApp(openHomeRequest: Long = 0L) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     var selectedPage by rememberSaveable { mutableStateOf(RootPage.Home) }
     var selectedHomeworkScopeIndex by rememberSaveable { mutableStateOf(0) }
     var readerSummary by rememberSaveable { mutableStateOf<String?>(null) }
-    var isReading by rememberSaveable { mutableStateOf(false) }
+    var readingSources by remember { mutableStateOf(emptySet<EkwingAnswerSource>()) }
     var remoteStatus by remember { mutableStateOf(EkloseApplication.remoteStatus ?: EkloseRemoteConfigManager.cachedStatus) }
     var remoteDialog by remember { mutableStateOf<RemoteDialogState?>(null) }
     var showVerificationDialog by rememberSaveable { mutableStateOf(false) }
     var showAboutDialog by rememberSaveable { mutableStateOf(false) }
-    val context = LocalContext.current
+    var floatingNavigationBar by remember {
+        mutableStateOf(EkwingLoginStore.useFloatingNavigationBar(context))
+    }
     val scope = rememberCoroutineScope()
     val selectedHomeworkScope = HomeworkScope.entries[selectedHomeworkScopeIndex]
     val answerStates by EkwingAnswerState.states.collectAsState()
     val selectedSourceState = answerStates[selectedHomeworkScope.answerSource] ?: EkwingAnswerSourceState()
+
+    DisposableEffect(lifecycleOwner, context) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                floatingNavigationBar = EkwingLoginStore.useFloatingNavigationBar(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     LaunchedEffect(Unit) {
         EkwingAnswerCacheStore.restore(context)
@@ -220,14 +256,27 @@ private fun EkloseApp(openHomeRequest: Long = 0L) {
             )
         },
         bottomBar = {
-            NavigationBar {
-                RootPage.entries.forEach { page ->
-                    NavigationBarItem(
-                        selected = selectedPage == page,
-                        onClick = { selectedPage = page },
-                        icon = page.icon,
-                        label = page.label,
-                    )
+            if (floatingNavigationBar) {
+                FloatingNavigationBar {
+                    RootPage.entries.forEach { page ->
+                        FloatingNavigationBarItem(
+                            selected = selectedPage == page,
+                            onClick = { selectedPage = page },
+                            icon = page.icon,
+                            label = page.label,
+                        )
+                    }
+                }
+            } else {
+                NavigationBar {
+                    RootPage.entries.forEach { page ->
+                        NavigationBarItem(
+                            selected = selectedPage == page,
+                            onClick = { selectedPage = page },
+                            icon = page.icon,
+                            label = page.label,
+                        )
+                    }
                 }
             }
         },
@@ -273,24 +322,30 @@ private fun EkloseApp(openHomeRequest: Long = 0L) {
                             readerSummary = null
                         },
                         sourceState = selectedSourceState,
-                        isReading = isReading,
+                        isReading = selectedHomeworkScope.answerSource in readingSources,
                         onRead = {
-                            if (isReading) return@ReaderPage
-                            isReading = true
-                            readerSummary = "正在读取${selectedHomeworkScope.label}..."
+                            val requestedScope = selectedHomeworkScope
+                            val requestedSource = requestedScope.answerSource
+                            if (requestedSource in readingSources) return@ReaderPage
+                            readingSources += requestedSource
+                            readerSummary = "正在读取${requestedScope.label}..."
                             scope.launch {
                                 runCatching {
                                     withContext(Dispatchers.IO) {
                                         EkwingAnswerReader(context).readPapers(
-                                            history = selectedHomeworkScope == HomeworkScope.History,
+                                            source = requestedSource,
                                         )
                                     }
                                 }.onSuccess { result ->
-                                    readerSummary = "已加载 ${result.size} 份${selectedHomeworkScope.label}，正在后台解析答案"
+                                    if (HomeworkScope.entries[selectedHomeworkScopeIndex].answerSource == requestedSource) {
+                                        readerSummary = "已加载 ${result.size} 份${requestedScope.label}，正在后台解析答案"
+                                    }
                                 }.onFailure { error ->
-                                    readerSummary = "读取失败：${error.message}"
+                                    if (HomeworkScope.entries[selectedHomeworkScopeIndex].answerSource == requestedSource) {
+                                        readerSummary = "读取失败：${error.message}"
+                                    }
                                 }
-                                isReading = false
+                                readingSources -= requestedSource
                             }
                         },
                         onDelete = {
@@ -394,42 +449,20 @@ private fun VerificationDialog(
     status: EkloseRemoteStatus?,
     onVerified: () -> Unit,
 ) {
-    if (!show) return
     val context = LocalContext.current
     var input by rememberSaveable { mutableStateOf("") }
     var errorText by rememberSaveable { mutableStateOf("") }
-    androidx.compose.ui.window.Dialog(
-        onDismissRequest = {},
-        properties = androidx.compose.ui.window.DialogProperties(
-            dismissOnBackPress = false,
-            dismissOnClickOutside = false,
-        ),
+    OverlayDialog(
+        show = show,
+        title = status?.verificationTitle?.ifBlank { "启动验证" } ?: "启动验证",
+        summary = status?.verificationMessage?.ifBlank { "请输入验证码继续使用。" }
+            ?: "请输入验证码继续使用。",
+        onDismissRequest = null,
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(
-                    color = MiuixTheme.colorScheme.background,
-                    shape = androidx.compose.foundation.shape.RoundedCornerShape(28.dp),
-                )
-                .padding(24.dp),
+            modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            top.yukonga.miuix.kmp.basic.Text(
-                text = status?.verificationTitle?.ifBlank { "启动验证" } ?: "启动验证",
-                modifier = Modifier.fillMaxWidth(),
-                fontSize = MiuixTheme.textStyles.title4.fontSize,
-                fontWeight = FontWeight.Medium,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                color = MiuixTheme.colorScheme.onBackground,
-            )
-            top.yukonga.miuix.kmp.basic.Text(
-                text = status?.verificationMessage?.ifBlank { "请输入验证码继续使用。" } ?: "请输入验证码继续使用。",
-                modifier = Modifier.fillMaxWidth(),
-                fontSize = MiuixTheme.textStyles.body1.fontSize,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                color = MiuixTheme.colorScheme.onSurfaceSecondary,
-            )
             top.yukonga.miuix.kmp.basic.TextField(
                 value = input,
                 onValueChange = {
@@ -439,7 +472,6 @@ private fun VerificationDialog(
                 modifier = Modifier.fillMaxWidth(),
                 label = "验证码",
                 singleLine = true,
-                cornerRadius = 16.dp,
                 visualTransformation = PasswordVisualTransformation(),
             )
             if (errorText.isNotBlank()) {
@@ -455,6 +487,8 @@ private fun VerificationDialog(
                     val code = input.trim()
                     if (code == status?.verificationCode) {
                         EkwingLoginStore.saveLocalVerificationCode(context, code)
+                        input = ""
+                        errorText = ""
                         onVerified()
                     } else {
                         errorText = "验证码不正确，请重新输入"
@@ -537,7 +571,7 @@ private fun HomePage(
         ?: "云端读取前请确认没有正在进行考试、练习、录音或提交。"
     val changelogTitle = remoteStatus?.changelogTitle?.takeIf { it.isNotBlank() } ?: "更新日志"
     val changelogSummary = remoteStatus?.changelogSummary?.takeIf { it.isNotBlank() }
-        ?: "新增读取页考试来源切换与试卷列表预览。"
+        ?: "新增读取页内容来源切换与列表预览。"
 
     DisposableEffect(lifecycleOwner, context) {
         val observer = LifecycleEventObserver { _, event ->
@@ -775,14 +809,18 @@ private fun ReaderPage(
                 item {
                     PageLead(
                         title = "读取",
-                        summary = readerSummary ?: homeworkScope.readerSummary,
+                        summary = when {
+                            readerSummary != null -> readerSummary
+                            isReading -> "正在读取${homeworkScope.label}..."
+                            else -> homeworkScope.readerSummary
+                        },
                     )
                 }
                 item {
                     GroupSection {
                         OverlayDropdownPreference(
-                            title = "读取考试",
-                            summary = "选择读取页使用的考试来源",
+                            title = "读取内容",
+                            summary = "选择读取页使用的考试或作业来源",
                             items = HomeworkScope.entries.map { it.label },
                             selectedIndex = selectedHomeworkScopeIndex,
                             onSelectedIndexChange = onHomeworkScopeChange,
@@ -790,7 +828,7 @@ private fun ReaderPage(
                     }
                 }
                 item {
-                    GroupSection(title = "试卷列表") {
+                    GroupSection(title = "${homeworkScope.listName}列表") {
                         papers.forEachIndexed { index, paper ->
                             val parseState = sourceState.parseStateByPaperKey[paper.key]
                                 ?: EkwingAnswerParseState(EkwingAnswerParseStatus.Pending)
@@ -815,8 +853,8 @@ private fun ReaderPage(
                         }
                         if (papers.isEmpty()) {
                             GroupItem(
-                                title = if (isReading) "正在读取" else "暂无试卷",
-                                summary = if (isReading) "请稍候" else "点击右下角读取按钮加载考试列表",
+                                title = if (isReading) "正在读取${homeworkScope.contentName}" else "暂无${homeworkScope.listName}",
+                                summary = if (isReading) "请稍候" else "点击右下角读取按钮加载${homeworkScope.contentName}列表",
                                 showArrow = false,
                             )
                         }
