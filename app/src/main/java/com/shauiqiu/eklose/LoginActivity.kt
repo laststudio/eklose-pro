@@ -51,9 +51,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
+import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
+import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.blur.layerBackdrop
@@ -289,10 +291,8 @@ private fun LoginScreen(
                         }
                         Spacer(modifier = Modifier.height(14.dp))
                         GroupSection {
-                            TextButton(
-                                text = if (isBusy) "处理中..." else mode.title,
+                            Button(
                                 onClick = {
-                                    if (isBusy) return@TextButton
                                     val validationError = validateLoginInput(
                                         mode = mode,
                                         username = username,
@@ -303,7 +303,7 @@ private fun LoginScreen(
                                     )
                                     if (validationError != null) {
                                         statusText = validationError
-                                        return@TextButton
+                                        return@Button
                                     }
                                     isBusy = true
                                     statusText = "正在登录..."
@@ -351,11 +351,18 @@ private fun LoginScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(12.dp),
-                                colors = ButtonDefaults.textButtonColors(
-                                    color = MiuixTheme.colorScheme.primary,
-                                    textColor = MiuixTheme.colorScheme.onPrimary,
-                                ),
-                            )
+                                enabled = !isBusy,
+                                colors = ButtonDefaults.buttonColorsPrimary(),
+                            ) {
+                                if (isBusy) {
+                                    InfiniteProgressIndicator(
+                                        color = MiuixTheme.colorScheme.onPrimary,
+                                        size = 20.dp,
+                                    )
+                                } else {
+                                    Text(text = "登录")
+                                }
+                            }
                         }
                     }
                 }
