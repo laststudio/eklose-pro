@@ -70,9 +70,7 @@ import com.shauiqiu.eklose.ui.liquid.rememberCombinedBackdrop
 import com.shauiqiu.eklose.ui.liquid.vibrancy
 import com.shauiqiu.eklose.ui.miuix.animation.DampedDragAnimation
 import com.shauiqiu.eklose.ui.miuix.animation.InteractiveHighlight
-import com.shauiqiu.eklose.ui.theme.LocalEkloseCardSurface
 import com.shauiqiu.eklose.ui.theme.LocalEkloseIsDarkTheme
-import com.shauiqiu.eklose.ui.theme.LocalEklosePageBackground
 import top.yukonga.miuix.kmp.blur.Backdrop
 import top.yukonga.miuix.kmp.blur.blur
 import top.yukonga.miuix.kmp.blur.drawBackdrop
@@ -219,10 +217,7 @@ fun FloatingBottomBar(
     val pillShape = remember { CircleShape }
     val accentColor = MiuixTheme.colorScheme.primary
     val tabContentColor = MiuixTheme.colorScheme.onSurface
-    // KernelSU derives these from the same Miuix theme surface as its backdrop. Eklose has
-    // explicit resolved page/card surfaces, so use those as the visual source while keeping
-    // KernelSU's glass alpha parameter unchanged.
-    val surfaceContainer = LocalEkloseCardSurface.current
+    val surfaceContainer = MiuixTheme.colorScheme.surfaceContainer
     val containerColor = if (isBlurEnabled) surfaceContainer.copy(0.4f) else surfaceContainer
 
     val tabsBackdrop = rememberLayerBackdrop()

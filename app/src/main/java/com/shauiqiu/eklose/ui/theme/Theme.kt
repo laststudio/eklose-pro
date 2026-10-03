@@ -253,13 +253,12 @@ fun EkloseTheme(
             )
         }
     }.getOrNull()
-    val pageBackground = if (darkTheme) {
-        if (colorMode == EkloseColorMode.Amoled) Color.Black else Color(0xFF101010)
-    } else {
-        Color(0xFFF7F7F7)
-    }
-    val cardSurface = if (darkTheme) Color(0xFF1C1C1E) else Color.White
     val themeContent: @Composable () -> Unit = {
+        // These locals must come from the same generated Miuix palette used by the glass
+        // backdrop. Keeping a second hardcoded surface palette makes identical shaders render
+        // differently from KernelSU.
+        val pageBackground = MiuixTheme.colorScheme.surface
+        val cardSurface = MiuixTheme.colorScheme.surfaceContainer
         LaunchedEffect(darkTheme) {
             val window = (context as? Activity)?.window ?: return@LaunchedEffect
             WindowInsetsControllerCompat(window, window.decorView).apply {

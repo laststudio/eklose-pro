@@ -327,9 +327,7 @@ private fun EkloseApp(openHomeRequest: Long = 0L) {
         }
         val scrollBehavior = MiuixScrollBehavior()
         val blurBackdrop = rememberEkloseBlurBackdrop()
-        // Use Eklose's resolved page surface for the backdrop. The Miuix controller surface
-        // is not guaranteed to match the effective light/dark page surface in this app.
-        val floatingSurfaceColor = LocalEklosePageBackground.current
+        val floatingSurfaceColor = MiuixTheme.colorScheme.surface
         val floatingBackdrop = rememberLayerBackdrop {
             drawRect(floatingSurfaceColor)
             drawContent()
