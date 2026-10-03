@@ -34,6 +34,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.shauiqiu.eklose.ui.theme.EkloseAccentColor
 import com.shauiqiu.eklose.ui.theme.EkloseColorMode
@@ -76,6 +77,7 @@ class SettingsActivity : ComponentActivity() {
 internal fun SettingsScreenRoute(
     onBack: () -> Unit,
     embedded: Boolean = false,
+    bottomInnerPadding: Dp = 0.dp,
 ) {
     val context = LocalContext.current
     val colorMode = rememberEkloseColorMode()
@@ -96,6 +98,7 @@ internal fun SettingsScreenRoute(
         onPaletteStyleChange = { EkwingLoginStore.setPaletteStyle(context, EklosePaletteStyle.entries[it].value) },
         onColorModeChange = { EkwingLoginStore.setColorMode(context, EkloseColorMode.entries[it].storedValue) },
         embedded = embedded,
+        bottomInnerPadding = bottomInnerPadding,
     )
 }
 
@@ -113,6 +116,7 @@ internal fun SettingsScreen(
     onPaletteStyleChange: (Int) -> Unit,
     onColorModeChange: (Int) -> Unit,
     embedded: Boolean = false,
+    bottomInnerPadding: Dp = 0.dp,
 ) {
     val context = LocalContext.current
     val scrollBehavior = MiuixScrollBehavior()
@@ -144,7 +148,12 @@ internal fun SettingsScreen(
         ) {
             EkloseResponsiveList(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 14.dp),
+                contentPadding = PaddingValues(
+                    start = 18.dp,
+                    top = 14.dp,
+                    end = 18.dp,
+                    bottom = 14.dp + bottomInnerPadding,
+                ),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 item {

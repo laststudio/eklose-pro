@@ -29,6 +29,8 @@ import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.add
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.consumeWindowInsets
@@ -71,6 +73,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -436,11 +439,20 @@ private fun EkloseApp(openHomeRequest: Long = 0L) {
             }
         },
     ) { innerPadding ->
+        val layoutDirection = LocalLayoutDirection.current
+        val bottomInnerPadding = innerPadding.calculateBottomPadding()
         Row(
             modifier = Modifier
                 .fillMaxSize()
                 .consumeWindowInsets(innerPadding)
-                .padding(innerPadding)
+                // Keep the pager itself behind the floating bar, as KernelSU does. Only
+                // apply the top and horizontal insets here; pages receive bottomInnerPadding
+                // for their scroll content separately.
+                .padding(
+                    start = innerPadding.calculateStartPadding(layoutDirection),
+                    top = innerPadding.calculateTopPadding(),
+                    end = innerPadding.calculateEndPadding(layoutDirection),
+                )
                 .nestedScroll(scrollBehavior.nestedScrollConnection),
         ) {
             if (useNavigationRail) {
@@ -495,10 +507,12 @@ private fun EkloseApp(openHomeRequest: Long = 0L) {
                     when (RootPage.entries[pageIndex]) {
                     RootPage.Home -> HomePage(
                         remoteStatus = remoteStatus,
+                        bottomInnerPadding = bottomInnerPadding,
                         onShowAbout = { showAboutDialog = true },
                     )
                     RootPage.Reader -> ReaderPage(
                         homeworkScope = selectedHomeworkScope,
+                        bottomInnerPadding = bottomInnerPadding,
                         readerSummary = readerSummary,
                         selectedHomeworkScopeIndex = selectedHomeworkScopeIndex,
                         onHomeworkScopeChange = {
@@ -544,6 +558,7 @@ private fun EkloseApp(openHomeRequest: Long = 0L) {
                     RootPage.Settings -> SettingsScreenRoute(
                         onBack = {},
                         embedded = true,
+                        bottomInnerPadding = bottomInnerPadding,
                     )
                 }
             }
@@ -763,6 +778,7 @@ private fun ReaderFloatingToolbar(
 @Composable
 private fun HomePage(
     remoteStatus: EkloseRemoteStatus?,
+    bottomInnerPadding: androidx.compose.ui.unit.Dp,
     onShowAbout: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -793,7 +809,12 @@ private fun HomePage(
 
     EkloseResponsiveList(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
+        contentPadding = PaddingValues(
+            start = 12.dp,
+            top = 12.dp,
+            end = 12.dp,
+            bottom = 12.dp + bottomInnerPadding,
+        ),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
@@ -1177,6 +1198,7 @@ private fun LoginStatusIndicator(text: String) {
 @Composable
 private fun ReaderPage(
     homeworkScope: HomeworkScope,
+    bottomInnerPadding: androidx.compose.ui.unit.Dp,
     readerSummary: String?,
     selectedHomeworkScopeIndex: Int,
     onHomeworkScopeChange: (Int) -> Unit,
@@ -1212,7 +1234,12 @@ private fun ReaderPage(
                 modifier = contentModifier
                     .scrollEndHaptic()
                     .overScrollVertical(),
-                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 14.dp),
+                contentPadding = PaddingValues(
+                    start = 18.dp,
+                    top = 14.dp,
+                    end = 18.dp,
+                    bottom = 14.dp + bottomInnerPadding,
+                ),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 item {
