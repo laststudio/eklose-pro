@@ -54,6 +54,7 @@ import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
 import top.yukonga.miuix.kmp.basic.Surface
@@ -194,9 +195,10 @@ private fun LoginScreen(
                     }
                 }
                 item {
-                    GroupSection(title = "信息") {
+                    Column {
+                        SmallTitle(text = "信息")
                         Column(
-                            modifier = Modifier.padding(12.dp),
+                            modifier = Modifier.padding(horizontal = 12.dp),
                             verticalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
                             if (mode == LoginMode.Account) {
@@ -289,78 +291,76 @@ private fun LoginScreen(
                     }
                 }
                 item {
-                    GroupSection {
-                        Button(
-                            onClick = {
-                                val validationError = validateLoginInput(
-                                    mode = mode,
-                                    username = username,
-                                    password = password,
-                                    name = name,
-                                    schoolName = schoolName,
-                                    schoolId = schoolId,
-                                )
-                                if (validationError != null) {
-                                    statusText = validationError
-                                    return@Button
-                                }
-                                isBusy = true
-                                statusText = "正在登录..."
-                                coroutineScope.launch {
-                                    runCatching {
-                                        withContext(Dispatchers.IO) {
-                                            when (mode) {
-                                                LoginMode.Account -> client.loginByAccount(
-                                                    username = username.trim(),
-                                                    password = password,
-                                                )
-                                                LoginMode.RealName -> client.loginByRealName(
-                                                    name = EkwingLoginStore.resolveRealName(context, name),
-                                                    password = password,
-                                                    schoolName = schoolName.trim(),
-                                                    schoolId = schoolId.trim(),
-                                                )
-                                            }
-                                        }
-                                    }.onSuccess { result ->
-                                        saveLoginResult(
-                                            context = context,
-                                            result = result,
-                                            mode = mode,
-                                            username = username,
-                                            password = password,
-                                            name = name,
-                                            schoolName = schoolName,
-                                            schoolId = schoolId,
-                                        )
-                                        statusText = "登录成功：uid=${result.uid}"
-                                        password = ""
-                                        onLoginSuccess()
-                                    }.onFailure { error ->
-                                        if (error is EkwingOvernameRequired) {
-                                            pendingOvername = error
-                                            statusText = "请选择同名账号"
-                                        } else {
-                                            statusText = "登录失败：${error.message}"
+                    Button(
+                        onClick = {
+                            val validationError = validateLoginInput(
+                                mode = mode,
+                                username = username,
+                                password = password,
+                                name = name,
+                                schoolName = schoolName,
+                                schoolId = schoolId,
+                            )
+                            if (validationError != null) {
+                                statusText = validationError
+                                return@Button
+                            }
+                            isBusy = true
+                            statusText = "正在登录..."
+                            coroutineScope.launch {
+                                runCatching {
+                                    withContext(Dispatchers.IO) {
+                                        when (mode) {
+                                            LoginMode.Account -> client.loginByAccount(
+                                                username = username.trim(),
+                                                password = password,
+                                            )
+                                            LoginMode.RealName -> client.loginByRealName(
+                                                name = EkwingLoginStore.resolveRealName(context, name),
+                                                password = password,
+                                                schoolName = schoolName.trim(),
+                                                schoolId = schoolId.trim(),
+                                            )
                                         }
                                     }
-                                    isBusy = false
+                                }.onSuccess { result ->
+                                    saveLoginResult(
+                                        context = context,
+                                        result = result,
+                                        mode = mode,
+                                        username = username,
+                                        password = password,
+                                        name = name,
+                                        schoolName = schoolName,
+                                        schoolId = schoolId,
+                                    )
+                                    statusText = "登录成功：uid=${result.uid}"
+                                    password = ""
+                                    onLoginSuccess()
+                                }.onFailure { error ->
+                                    if (error is EkwingOvernameRequired) {
+                                        pendingOvername = error
+                                        statusText = "请选择同名账号"
+                                    } else {
+                                        statusText = "登录失败：${error.message}"
+                                    }
                                 }
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
-                            enabled = !isBusy,
-                            colors = ButtonDefaults.buttonColorsPrimary(),
-                        ) {
-                            if (isBusy) {
-                                InfiniteProgressIndicator(
-                                    color = MiuixTheme.colorScheme.onPrimary,
-                                    size = 20.dp,
-                                )
-                            } else {
-                                Text(text = "登录")
+                                isBusy = false
                             }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        enabled = !isBusy,
+                        colors = ButtonDefaults.buttonColorsPrimary(),
+                    ) {
+                        if (isBusy) {
+                            InfiniteProgressIndicator(
+                                color = MiuixTheme.colorScheme.onPrimary,
+                                size = 20.dp,
+                            )
+                        } else {
+                            Text(text = "登录")
                         }
                     }
                 }
