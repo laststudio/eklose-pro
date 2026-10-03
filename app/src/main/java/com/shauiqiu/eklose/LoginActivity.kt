@@ -64,6 +64,7 @@ import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
+import top.yukonga.miuix.kmp.basic.TextFieldDefaults
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.basic.Search
 import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
@@ -199,7 +200,12 @@ private fun LoginScreen(
                             verticalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
                             if (mode == LoginMode.Account) {
-                                LoginField(username, { username = it }, "账号")
+                                LoginField(
+                                    value = username,
+                                    onValueChange = { username = it },
+                                    label = "账号",
+                                    errorText = statusText.takeIf { it == "请输入账号" },
+                                )
                             } else {
                                 LoginField(
                                     value = schoolKeyword,
@@ -210,6 +216,9 @@ private fun LoginScreen(
                                         showSchoolResults = false
                                     },
                                     label = "学校关键字",
+                                    errorText = statusText.takeIf {
+                                        it == "请先输入学校关键字" || it == "请先搜索并选择学校"
+                                    },
                                     trailing = {
                                         IconButton(
                                             onClick = {
@@ -247,9 +256,20 @@ private fun LoginScreen(
                                         }
                                     },
                                 )
-                                LoginField(name, { name = it }, "学生姓名")
+                                LoginField(
+                                    value = name,
+                                    onValueChange = { name = it },
+                                    label = "学生姓名",
+                                    errorText = statusText.takeIf { it == "请输入学生姓名" },
+                                )
                             }
-                            LoginField(password, { password = it }, "密码", password = true)
+                            LoginField(
+                                value = password,
+                                onValueChange = { password = it },
+                                label = "密码",
+                                password = true,
+                                errorText = statusText.takeIf { it == "请输入密码" },
+                            )
                         }
                     }
                 }
@@ -414,17 +434,40 @@ private fun LoginField(
     onValueChange: (String) -> Unit,
     label: String,
     password: Boolean = false,
+    errorText: String? = null,
     trailing: @Composable (() -> Unit)? = null,
 ) {
-    TextField(
-        value = value,
-        onValueChange = onValueChange,
-        modifier = Modifier.fillMaxWidth(),
-        label = label,
-        singleLine = true,
-        visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
-        trailingIcon = trailing,
-    )
+    Column(modifier = Modifier.fillMaxWidth()) {
+        TextField(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = Modifier.fillMaxWidth(),
+            label = label,
+            singleLine = true,
+            colors = TextFieldDefaults.textFieldColors(
+                labelColor = if (errorText != null) {
+                    MiuixTheme.colorScheme.error
+                } else {
+                    MiuixTheme.colorScheme.onSecondaryContainer
+                },
+                borderColor = if (errorText != null) {
+                    MiuixTheme.colorScheme.error
+                } else {
+                    MiuixTheme.colorScheme.primary
+                },
+            ),
+            visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
+            trailingIcon = trailing,
+        )
+        if (errorText != null) {
+            Text(
+                text = errorText,
+                modifier = Modifier.padding(start = 16.dp, top = 4.dp),
+                style = MiuixTheme.textStyles.body2,
+                color = MiuixTheme.colorScheme.error,
+            )
+        }
+    }
 }
 
 @Composable
