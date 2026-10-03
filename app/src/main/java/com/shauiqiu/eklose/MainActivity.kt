@@ -473,19 +473,19 @@ private fun EkloseApp(openHomeRequest: Long = 0L) {
                     .background(MiuixTheme.colorScheme.surface),
             ) {
             Box(
-                modifier = Modifier
-                    .then(if (blurBackdrop != null) Modifier.layerBackdrop(blurBackdrop) else Modifier)
-                    .then(
-                        if (floatingNavigationBar && floatingGlassActive) {
-                            Modifier.layerBackdrop(floatingBackdrop)
-                        } else {
-                            Modifier
-                        },
-                    ),
+                modifier = if (blurBackdrop != null) Modifier.layerBackdrop(blurBackdrop) else Modifier,
             ) {
                 HorizontalPager(
                     state = pagerState,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .then(
+                            if (floatingNavigationBar && floatingGlassActive) {
+                                Modifier.layerBackdrop(floatingBackdrop)
+                            } else {
+                                Modifier
+                            },
+                        ),
                     beyondViewportPageCount = 1,
                 ) { pageIndex ->
                     when (RootPage.entries[pageIndex]) {
