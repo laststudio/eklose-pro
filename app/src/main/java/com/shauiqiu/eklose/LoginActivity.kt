@@ -127,7 +127,12 @@ private fun LoginScreen(
     var pendingOvername by remember { mutableStateOf<EkwingOvernameRequired?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(statusText) {
-        if (statusText.startsWith("搜索学校失败") || statusText.startsWith("登录失败") || statusText == "请选择同名账号") {
+        if (
+            statusText.startsWith("搜索学校失败") ||
+            statusText.startsWith("登录失败") ||
+            statusText == "请选择同名账号" ||
+            statusText == "未搜索到学校"
+        ) {
             snackbarHostState.showSnackbar(statusText)
         }
     }
@@ -219,7 +224,9 @@ private fun LoginScreen(
                                     },
                                     label = "学校关键字",
                                     errorText = statusText.takeIf {
-                                        it == "请先输入学校关键字" || it == "请先搜索并选择学校"
+                                        it == "请先输入学校关键字" ||
+                                            it == "请先搜索并选择学校" ||
+                                            it == "未搜索到学校"
                                     },
                                     trailing = {
                                         IconButton(
