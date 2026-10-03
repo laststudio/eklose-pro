@@ -586,9 +586,8 @@ private fun OvernameBottomSheet(
                             )
                         },
                         insideMargin = PaddingValues(horizontal = 18.dp, vertical = 14.dp),
-                        onClick = {
-                            if (!isBusy) onChoose(account)
-                        },
+                        enabled = !isBusy,
+                        onClick = { onChoose(account) },
                     )
                 }
             }
