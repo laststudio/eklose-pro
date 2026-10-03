@@ -473,14 +473,17 @@ fun FloatingBottomBar(
                                     color = if (!isInDark) Color.Black.copy(alpha = 0.1f) else Color.White.copy(alpha = 0.1f),
                                     alpha = 1f - progress,
                                 )
-                                drawRect(Color.Black.copy(alpha = 0.03f * glassProgress))
+                                // Keep KernelSU's resting surface/shadow values. The resting
+                                // glass refraction remains, but it must not add a permanent
+                                // dark overlay after release.
+                                drawRect(Color.Black.copy(alpha = 0.03f * progress))
                             },
                         )
                         .innerShadow(shape = pillShape) {
                             InnerShadow(
-                                radius = 8.dp * glassProgress,
+                                radius = 8.dp * dampedDragAnimation.pressProgress,
                                 color = Color.Black.copy(alpha = 0.15f),
-                                alpha = glassProgress,
+                                alpha = dampedDragAnimation.pressProgress,
                             )
                         }
                         .height(56.dp)
