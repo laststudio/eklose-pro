@@ -218,28 +218,40 @@ fun EkloseTheme(
         null
     }
     val resolvedKeyColor = accentColor.argb.takeIf { it != 0 }?.let(::Color) ?: systemAccentColor
-    val controllerLightColors = if (colorMode == EkloseColorMode.Amoled) colors else lightColorScheme()
-    val controllerDarkColors = if (colorMode == EkloseColorMode.Amoled) colors else darkColorScheme()
     val controllerPaletteStyle = runCatching {
         ThemePaletteStyle.valueOf(paletteStyle.value)
     }.getOrDefault(ThemePaletteStyle.TonalSpot)
     val controller = runCatching {
-        ThemeController(
-            when (colorMode) {
-                EkloseColorMode.System -> ColorSchemeMode.System
-                EkloseColorMode.Light -> ColorSchemeMode.Light
-                EkloseColorMode.Dark, EkloseColorMode.Amoled -> ColorSchemeMode.Dark
-                EkloseColorMode.MonetSystem -> ColorSchemeMode.MonetSystem
-                EkloseColorMode.MonetLight -> ColorSchemeMode.MonetLight
-                EkloseColorMode.MonetDark -> ColorSchemeMode.MonetDark
-            },
-            lightColors = controllerLightColors,
-            darkColors = controllerDarkColors,
-            keyColor = resolvedKeyColor,
-            isDark = darkTheme,
-            paletteStyle = controllerPaletteStyle,
-            colorSpec = effectiveColorSpec(colorSpec, paletteStyle),
-        )
+        val colorSchemeMode = when (colorMode) {
+            EkloseColorMode.System -> ColorSchemeMode.System
+            EkloseColorMode.Light -> ColorSchemeMode.Light
+            EkloseColorMode.Dark, EkloseColorMode.Amoled -> ColorSchemeMode.Dark
+            EkloseColorMode.MonetSystem -> ColorSchemeMode.MonetSystem
+            EkloseColorMode.MonetLight -> ColorSchemeMode.MonetLight
+            EkloseColorMode.MonetDark -> ColorSchemeMode.MonetDark
+        }
+        if (colorMode == EkloseColorMode.Amoled) {
+            // Preserve Eklose's AMOLED surface override, while using KernelSU's generated
+            // Miuix color pipeline for every other color mode.
+            ThemeController(
+                colorSchemeMode,
+                lightColors = colors,
+                darkColors = colors,
+                keyColor = resolvedKeyColor,
+                isDark = darkTheme,
+                paletteStyle = controllerPaletteStyle,
+                colorSpec = effectiveColorSpec(colorSpec, paletteStyle),
+            )
+        } else {
+            // Match KernelSU: do not inject separate static light/dark palettes here.
+            ThemeController(
+                colorSchemeMode,
+                keyColor = resolvedKeyColor,
+                isDark = darkTheme,
+                paletteStyle = controllerPaletteStyle,
+                colorSpec = effectiveColorSpec(colorSpec, paletteStyle),
+            )
+        }
     }.getOrNull()
     val pageBackground = if (darkTheme) {
         if (colorMode == EkloseColorMode.Amoled) Color.Black else Color(0xFF101010)
