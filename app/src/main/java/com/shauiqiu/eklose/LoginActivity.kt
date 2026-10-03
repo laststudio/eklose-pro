@@ -194,6 +194,7 @@ private fun LoginScreen(
                             },
                             items = LoginMode.entries.map { it.title },
                             selectedIndex = LoginMode.entries.indexOf(mode),
+                            enabled = !isBusy,
                             onSelectedIndexChange = { mode = LoginMode.entries[it] },
                         )
                     }
@@ -226,6 +227,7 @@ private fun LoginScreen(
                                     },
                                     trailing = {
                                         IconButton(
+                                            enabled = !isBusy,
                                             onClick = {
                                                 if (schoolKeyword.isBlank()) {
                                                     statusText = "请先输入学校关键字"
@@ -317,6 +319,7 @@ private fun LoginScreen(
                                             school.zone,
                                         ).filter { it.isNotBlank() }.joinToString(" · "),
                                         selected = schoolId == school.schoolId,
+                                        enabled = !isBusy,
                                         onClick = {
                                             schoolName = school.schoolName
                                             schoolId = school.schoolId
