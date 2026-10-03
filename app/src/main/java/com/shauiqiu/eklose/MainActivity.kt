@@ -121,6 +121,7 @@ import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.shader.isRenderEffectSupported
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
@@ -327,6 +328,7 @@ private fun EkloseApp(openHomeRequest: Long = 0L) {
         }
         val scrollBehavior = MiuixScrollBehavior()
         val blurBackdrop = rememberEkloseBlurBackdrop()
+        val floatingGlassActive = floatingNavigationBarGlass && isRenderEffectSupported()
         val floatingSurfaceColor = MiuixTheme.colorScheme.surface
         val floatingBackdrop = rememberLayerBackdrop {
             drawRect(floatingSurfaceColor)
@@ -393,7 +395,7 @@ private fun EkloseApp(openHomeRequest: Long = 0L) {
                         onSelected = navigation::navigateTo,
                         backdrop = floatingBackdrop,
                         tabsCount = RootPage.entries.size,
-                        isBlurEnabled = floatingNavigationBarGlass,
+                        isBlurEnabled = floatingGlassActive,
                     ) { activateTab ->
                         RootPage.entries.forEach { page ->
                             FloatingBottomBarItem(
@@ -478,7 +480,7 @@ private fun EkloseApp(openHomeRequest: Long = 0L) {
                     modifier = Modifier
                         .fillMaxSize()
                         .then(
-                            if (floatingNavigationBar && floatingNavigationBarGlass) {
+                            if (floatingNavigationBar && floatingGlassActive) {
                                 Modifier.layerBackdrop(floatingBackdrop)
                             } else {
                                 Modifier
