@@ -81,7 +81,9 @@ internal object EkloseLayoutBreakpoints {
 @Composable
 fun rememberEkloseBlurBackdrop(): LayerBackdrop? {
     if (!LocalEkloseBlurEnabled.current || !isRenderEffectSupported()) return null
-    val surfaceColor = MiuixTheme.colorScheme.surface
+    // Keep the shared backdrop aligned with the resolved Eklose page surface. The app's
+    // ThemeController colors and its effective page surface are not the same source.
+    val surfaceColor = LocalEklosePageBackground.current
     return rememberLayerBackdrop {
         drawRect(surfaceColor)
         drawContent()
@@ -102,7 +104,7 @@ fun EkloseBlurredBar(
                 blurRadius = 25f,
                 colors = BlurColors(
                     blendColors = listOf(
-                        BlendColorEntry(MiuixTheme.colorScheme.surface.copy(alpha = 0.87f)),
+                        BlendColorEntry(LocalEkloseCardSurface.current.copy(alpha = 0.87f)),
                     ),
                 ),
             )
