@@ -463,12 +463,12 @@ private fun EkloseApp(openHomeRequest: Long = 0L) {
                 }
                 }
             }
-            Surface(
+            // Match KernelSU's pager hierarchy: the backdrop wraps the pager directly,
+            // without an extra Surface layer between the page content and the sampled layer.
+            Box(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight(),
-                color = LocalEklosePageBackground.current,
-                contentColor = MiuixTheme.colorScheme.onSurface,
             ) {
             Box(
                 modifier = if (blurBackdrop != null) Modifier.layerBackdrop(blurBackdrop) else Modifier,
