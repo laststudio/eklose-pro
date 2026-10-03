@@ -478,7 +478,11 @@ private fun EkloseApp(openHomeRequest: Long = 0L) {
                 HorizontalPager(
                     state = pagerState,
                     modifier = Modifier
+                        // The layerBackdrop records the pager node itself, not its parent.
+                        // Put the Miuix surface inside that recorded node so the source is
+                        // never transparent/black when page content has no painted background.
                         .fillMaxSize()
+                        .background(MiuixTheme.colorScheme.surface)
                         .then(
                             if (floatingNavigationBar && floatingGlassActive) {
                                 Modifier.layerBackdrop(floatingBackdrop)
