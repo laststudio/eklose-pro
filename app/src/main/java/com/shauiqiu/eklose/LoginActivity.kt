@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.add
 import androidx.compose.foundation.layout.displayCutout
@@ -40,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
@@ -67,6 +69,8 @@ import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.basic.TextFieldDefaults
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.basic.Search
+import top.yukonga.miuix.kmp.icon.extended.Hide
+import top.yukonga.miuix.kmp.icon.extended.Show
 import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
 import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 import top.yukonga.miuix.kmp.preference.RadioButtonPreference
@@ -116,6 +120,7 @@ private fun LoginScreen(
     var mode by rememberSaveable { mutableStateOf(LoginMode.RealName) }
     var username by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
+    var passwordVisible by rememberSaveable { mutableStateOf(false) }
     var name by rememberSaveable { mutableStateOf("") }
     var schoolKeyword by rememberSaveable { mutableStateOf("") }
     var schoolName by rememberSaveable { mutableStateOf("") }
@@ -268,7 +273,21 @@ private fun LoginScreen(
                                 onValueChange = { password = it },
                                 label = "密码",
                                 password = true,
+                                passwordVisible = passwordVisible,
                                 errorText = statusText.takeIf { it == "请输入密码" },
+                                trailing = {
+                                    IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                                        Icon(
+                                            imageVector = if (passwordVisible) {
+                                                MiuixIcons.Hide
+                                            } else {
+                                                MiuixIcons.Show
+                                            },
+                                            contentDescription = if (passwordVisible) "隐藏密码" else "显示密码",
+                                            tint = MiuixTheme.colorScheme.onSurfaceVariantActions,
+                                        )
+                                    }
+                                },
                             )
                         }
                     }
@@ -434,6 +453,7 @@ private fun LoginField(
     onValueChange: (String) -> Unit,
     label: String,
     password: Boolean = false,
+    passwordVisible: Boolean = false,
     errorText: String? = null,
     trailing: @Composable (() -> Unit)? = null,
 ) {
@@ -444,6 +464,11 @@ private fun LoginField(
             modifier = Modifier.fillMaxWidth(),
             label = label,
             singleLine = true,
+            keyboardOptions = if (password) {
+                KeyboardOptions(keyboardType = KeyboardType.Password)
+            } else {
+                KeyboardOptions.Default
+            },
             colors = TextFieldDefaults.textFieldColors(
                 labelColor = if (errorText != null) {
                     MiuixTheme.colorScheme.error
@@ -456,7 +481,11 @@ private fun LoginField(
                     MiuixTheme.colorScheme.primary
                 },
             ),
-            visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
+            visualTransformation = if (password && !passwordVisible) {
+                PasswordVisualTransformation()
+            } else {
+                VisualTransformation.None
+            },
             trailingIcon = trailing,
         )
         if (errorText != null) {
