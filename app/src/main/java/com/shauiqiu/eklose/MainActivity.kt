@@ -467,7 +467,8 @@ private fun EkloseApp(openHomeRequest: Long = 0L) {
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .fillMaxHeight(),
+                    .fillMaxHeight()
+                    .background(MiuixTheme.colorScheme.surface),
             ) {
             Box(
                 modifier = if (blurBackdrop != null) Modifier.layerBackdrop(blurBackdrop) else Modifier,

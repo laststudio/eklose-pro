@@ -447,6 +447,9 @@ fun FloatingBottomBar(
                             backdrop = combinedBackdrop,
                             shape = { pillShape },
                             effects = {
+                                // The resting lens needs offscreen padding too; otherwise the
+                                // effect is clipped away as soon as pressProgress returns to 0.
+                                padding = maxOf(padding, 20.dp.toPx())
                                 lens(
                                     refractionHeight = 10.dp.toPx() * glassProgress,
                                     refractionAmount = 14.dp.toPx() * glassProgress,
