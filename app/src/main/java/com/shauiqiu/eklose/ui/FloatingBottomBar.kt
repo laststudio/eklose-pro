@@ -432,6 +432,9 @@ fun FloatingBottomBar(
 
         if (tabWidthPx > 0f) {
             val tabWidthDp = with(density) { tabWidthPx.toDp() }
+            // KernelSU keeps the selected pill's highlight/shadow press-only. Eklose also
+            // needs the requested resting refraction, so only the lens gets a small baseline.
+            val restingLensProgress = 0.45f + 0.55f * dampedDragAnimation.pressProgress
             if (isBlurEnabled) {
                 Box(
                     Modifier
@@ -444,10 +447,10 @@ fun FloatingBottomBar(
                             backdrop = combinedBackdrop,
                             shape = { pillShape },
                             effects = {
-                                val progress = dampedDragAnimation.pressProgress
+                                padding = maxOf(padding, 20.dp.toPx())
                                 lens(
-                                    refractionHeight = 10.dp.toPx() * progress,
-                                    refractionAmount = 14.dp.toPx() * progress,
+                                    refractionHeight = 10.dp.toPx() * restingLensProgress,
+                                    refractionAmount = 14.dp.toPx() * restingLensProgress,
                                     depthEffect = true,
                                     chromaticAberration = 0.5f,
                                 )
