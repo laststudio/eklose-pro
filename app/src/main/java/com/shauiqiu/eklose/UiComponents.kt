@@ -290,7 +290,7 @@ internal fun EkloseCard(
         ),
         showIndication = onClick != null,
         pressFeedbackType = PressFeedbackType.Sink,
-        onClick = { onClick?.invoke() },
+        onClick = onClick,
         content = content,
     )
 }
