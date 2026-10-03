@@ -212,7 +212,6 @@ fun FloatingBottomBar(
     isBlurEnabled: Boolean = true,
     content: @Composable RowScope.((Int) -> Unit) -> Unit
 ) {
-    // Keep the liquid-glass color parameters aligned with KernelSU's implementation.
     val isInDark = LocalEkloseIsDarkTheme.current
     val pillShape = remember { CircleShape }
     val accentColor = MiuixTheme.colorScheme.primary
@@ -432,9 +431,6 @@ fun FloatingBottomBar(
 
         if (tabWidthPx > 0f) {
             val tabWidthDp = with(density) { tabWidthPx.toDp() }
-            // Keep a resting glass state after the finger is released. Press progress should
-            // intensify the lens/highlight, not be the only condition that enables them.
-            val glassProgress = 0.45f + 0.55f * dampedDragAnimation.pressProgress
             if (isBlurEnabled) {
                 Box(
                     Modifier
@@ -447,18 +443,14 @@ fun FloatingBottomBar(
                             backdrop = combinedBackdrop,
                             shape = { pillShape },
                             effects = {
-                                // The resting lens needs offscreen padding too; otherwise the
-                                // effect is clipped away as soon as pressProgress returns to 0.
-                                padding = maxOf(padding, 20.dp.toPx())
+                                val progress = dampedDragAnimation.pressProgress
                                 lens(
-                                    refractionHeight = 10.dp.toPx() * glassProgress,
-                                    refractionAmount = 14.dp.toPx() * glassProgress,
+                                    refractionHeight = 10.dp.toPx() * progress,
+                                    refractionAmount = 14.dp.toPx() * progress,
                                     depthEffect = true,
                                     chromaticAberration = 0.5f,
                                 )
                             },
-                            // Keep KernelSU's color/highlight state exact; only the lens
-                            // refraction stays active after release.
                             highlight = { pillHighlight.value.copy(alpha = dampedDragAnimation.pressProgress) },
                             layerBlock = {
                                 scaleX = dampedDragAnimation.scaleX
@@ -473,9 +465,6 @@ fun FloatingBottomBar(
                                     color = if (!isInDark) Color.Black.copy(alpha = 0.1f) else Color.White.copy(alpha = 0.1f),
                                     alpha = 1f - progress,
                                 )
-                                // Keep KernelSU's resting surface/shadow values. The resting
-                                // glass refraction remains, but it must not add a permanent
-                                // dark overlay after release.
                                 drawRect(Color.Black.copy(alpha = 0.03f * progress))
                             },
                         )
