@@ -4,12 +4,17 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.add
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -23,16 +28,23 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.shauiqiu.eklose.ui.theme.EkloseTheme
+import com.shauiqiu.eklose.ui.theme.LocalEkloseCardSurface
+import com.shauiqiu.eklose.ui.theme.LocalEklosePageBackground
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
+import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.blur.layerBackdrop
+import top.yukonga.miuix.kmp.basic.SnackbarHostState
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -98,7 +110,10 @@ private fun AnnouncementScreen(
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
+    val scrollBehavior = MiuixScrollBehavior()
+    val blurBackdrop = rememberEkloseBlurBackdrop()
     val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
     val currentVersionName = remember(context) { context.currentVersionName() }
     var remoteStatus by remember { mutableStateOf(EkloseRemoteConfigManager.cachedStatus) }
     var content by remember { mutableStateOf(initialContent.withStatus(remoteStatus)) }
@@ -154,10 +169,20 @@ private fun AnnouncementScreen(
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
-        containerColor = MiuixTheme.colorScheme.surface,
+        containerColor = LocalEklosePageBackground.current,
+        contentWindowInsets = WindowInsets.systemBars
+            .add(WindowInsets.displayCutout)
+            .only(WindowInsetsSides.Horizontal),
+        snackbarHost = {
+            EkloseSnackbarHost(state = snackbarHostState)
+        },
         topBar = {
+            EkloseBlurredBar(blurBackdrop) {
             EkloseTopBar(
+                title = "公告与更新",
+                barColor = if (blurBackdrop != null) Color.Transparent else LocalEklosePageBackground.current,
                 onBack = onBack,
+                scrollBehavior = scrollBehavior,
                 actions = {
                     TextButton(
                         text = "检测更新",
@@ -168,28 +193,31 @@ private fun AnnouncementScreen(
                                         if (status.showUpdateDialog) {
                                             updateDialogStatus = status
                                         } else {
-                                            Toast.makeText(context, "当前已是最新版本", Toast.LENGTH_SHORT).show()
+                                            snackbarHostState.showSnackbar("当前已是最新版本")
                                         }
                                     }
                                     .onFailure {
-                                        Toast.makeText(context, "检测更新失败", Toast.LENGTH_SHORT).show()
+                                        snackbarHostState.showSnackbar("检测更新失败")
                                     }
                             }
                         },
                     )
                 },
             )
+            }
         },
     ) { innerPadding ->
         Surface(
             modifier = Modifier
                 .fillMaxSize()
                 .consumeWindowInsets(innerPadding)
-                .padding(innerPadding),
-            color = MiuixTheme.colorScheme.surface,
+                .padding(innerPadding)
+                .nestedScroll(scrollBehavior.nestedScrollConnection)
+                .let { if (blurBackdrop != null) it.layerBackdrop(blurBackdrop) else it },
+            color = LocalEklosePageBackground.current,
             contentColor = MiuixTheme.colorScheme.onSurface,
         ) {
-            LazyColumn(
+            EkloseResponsiveList(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(horizontal = 18.dp, vertical = 14.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -203,7 +231,7 @@ private fun AnnouncementScreen(
                 item {
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
-                        color = MiuixTheme.colorScheme.surface,
+                        color = Color.Transparent,
                         contentColor = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     ) {
                         Text(

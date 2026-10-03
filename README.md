@@ -1,7 +1,7 @@
 # 翼课校长 - 翼课学习中心答案提取器
 
 > 本项目已转为闭源开发，但仍会持续维护。本仓库继续面向普通用户提供安装包下载、使用教程、技术文档、更新日志和问题反馈。
-[![Kotlin](https://img.shields.io/badge/kotlin-2.3.21-7F52FF)](https://kotlinlang.org/)
+[![Kotlin](https://img.shields.io/badge/kotlin-2.4.20-7F52FF)](https://kotlinlang.org/)
 [![Compose](https://img.shields.io/badge/compose-4285F4)](https://developer.android.com/compose)
 [![miuix](https://img.shields.io/badge/UI-miuix-00A6FF)](https://github.com/miuix-kotlin-multiplatform/miuix)
 ![Android](https://img.shields.io/badge/Android-3DDC84?logo=android&logoColor=white)
@@ -38,6 +38,7 @@
 - 支持复制答案文本和分享答案图片
 - 支持公告、更新提醒和远程管理
 - 使用 miuix 风格界面组件
+- 支持响应式 NavigationRail、动态主题色、AMOLED 和 Miuix Blur
 
 ---
 
@@ -51,6 +52,8 @@
 4. 打开翼课校长 App
 
 如果手机提示“禁止安装未知来源应用”，按照系统提示允许安装即可。
+
+> 当前版本要求 Android 13（API 33）或更高版本。
 
 ### 第二步：登录翼课账号
 
@@ -197,9 +200,9 @@
 
 ## 感谢
 
-翼课校长的诞生离不开这些项目和贡献者的帮助：
+翼课校长的开发与演进离不开以下项目和技术生态的支持：
 
-**人类贡献者与开源项目：**
+**鸣谢：**
 - [ekwing_get_answer](https://github.com/laststudio/ekwing_get_answer) - 提供翼课接口和考试答案解析逻辑参考
 - [miuix](https://github.com/miuix-kotlin-multiplatform/miuix) - 提供 Android 界面组件和视觉风格
 - [Jetpack Compose](https://developer.android.com/compose) - 提供现代 Android 声明式 UI 能力
@@ -209,8 +212,8 @@
 
 ## 参考文档
 
+- [@专有商业软件许可与免责声明](./USER_AGREEMENT.md)
 - [@更新日志](./update.md)
-- [@当前版本变更](./current_changelog.md)
 - [@项目约束](./AGENTS.md)
 
 ---

@@ -38,11 +38,11 @@ jobs:
           fi
           echo "手动发布分支校验通过：main"
 
-      - name: 配置 JDK
+      - name: 配置 JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
 
       - name: 配置 Gradle 缓存
         uses: gradle/actions/setup-gradle@v4
@@ -98,11 +98,33 @@ jobs:
 
       - name: 构建正式版 APK
         shell: bash
-        run: ./gradlew assembleRelease
+        run: ./gradlew assembleRelease --console=plain
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+      - name: 验证 R8 与资源压缩生效
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="app/build/outputs/apk/release/app-release.apk"
+          if [ ! -f "$apk" ]; then
+            apk="$(find app/build/outputs/apk/release -name '*.apk' | head -n 1)"
+          fi
+          if [ -z "${apk:-}" ] || [ ! -f "$apk" ]; then
+            echo "没有找到 release APK。" >&2
+            exit 1
+          fi
+          if unzip -l "$apk" | grep -q "ui-tooling"; then
+            echo "检测到 Compose ui-tooling 调试类，R8 未生效！" >&2
+            exit 1
+          fi
+          if unzip -l "$apk" | grep -q "DebugProbesKt.bin"; then
+            echo "检测到 DebugProbesKt.bin，packaging 排除未生效！" >&2
+            exit 1
+          fi
+          echo "R8 与资源压缩验证通过。APK 大小：$(du -h "$apk" | cut -f1)"
 
       - name: 整理 APK 产物
         id: artifact
@@ -188,6 +210,7 @@ jobs:
           set -euo pipefail
           required_secrets=(
             "PUBLIC_RELEASE_TOKEN"
+            "LASTUDIO_PUBLISHER_TOKEN"
             "CONFIG_GITHUB_TOKEN"
             "GITEE_USERNAME"
             "GITEE_TOKEN"
@@ -203,6 +226,7 @@ jobs:
           echo "发布密钥校验通过。"
         env:
           PUBLIC_RELEASE_TOKEN: ${{ secrets.PUBLIC_RELEASE_TOKEN }}
+          LASTUDIO_PUBLISHER_TOKEN: ${{ secrets.LASTUDIO_PUBLISHER_TOKEN }}
           CONFIG_GITHUB_TOKEN: ${{ secrets.CONFIG_GITHUB_TOKEN }}
           GITEE_USERNAME: ${{ secrets.GITEE_USERNAME }}
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
@@ -298,6 +322,7 @@ jobs:
             --local-config-file config/config.json \
             --source-changelog-file update.md
         env:
+          LASTUDIO_PUBLISHER_TOKEN: ${{ secrets.LASTUDIO_PUBLISHER_TOKEN }}
           CONFIG_GITHUB_TOKEN: ${{ secrets.CONFIG_GITHUB_TOKEN }}
           CONFIG_GITHUB_REPO: ${{ vars.CONFIG_GITHUB_REPO || 'laststudio/Fe_config' }}
           CONFIG_GITHUB_BRANCH: ${{ vars.CONFIG_GITHUB_BRANCH || 'main' }}

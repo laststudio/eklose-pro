@@ -1,5 +1,6 @@
 package com.shauiqiu.eklose
 
+import android.content.SharedPreferences
 import android.content.Context
 import android.os.Build
 import android.provider.Settings
@@ -251,6 +252,13 @@ object EkwingLoginStore {
     private const val KEY_BASIC_API = "basic_api"
     private const val KEY_ALL_PAGES = "all_pages"
     private const val KEY_FLOATING_NAVIGATION_BAR = "floating_navigation_bar"
+    private const val KEY_FLOATING_NAVIGATION_BAR_GLASS = "floating_navigation_bar_glass"
+    private const val KEY_NAVIGATION_RAIL_EXPANDED = "navigation_rail_expanded"
+    private const val KEY_COLOR_MODE = "color_mode"
+    private const val KEY_PALETTE_STYLE = "palette_style"
+    private const val KEY_COLOR_SPEC = "color_spec"
+    private const val KEY_ACCENT_COLOR = "accent_color"
+    private const val KEY_BLUR_ENABLED = "blur_enabled"
     private const val KEY_REAL_NAME_ALIAS_FROM = "real_name_alias_from"
     private const val KEY_REAL_NAME_ALIAS_TO = "real_name_alias_to"
 
@@ -380,6 +388,143 @@ object EkwingLoginStore {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
             .putBoolean(KEY_FLOATING_NAVIGATION_BAR, enabled)
+            .apply()
+    }
+
+    fun useFloatingNavigationBarGlass(context: Context): Boolean {
+        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(KEY_FLOATING_NAVIGATION_BAR_GLASS, true)
+    }
+
+    fun setUseFloatingNavigationBarGlass(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_FLOATING_NAVIGATION_BAR_GLASS, enabled)
+            .apply()
+    }
+
+    fun colorMode(context: Context): Int {
+        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getInt(KEY_COLOR_MODE, 0)
+    }
+
+    fun setColorMode(context: Context, mode: Int) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putInt(KEY_COLOR_MODE, mode)
+            .apply()
+    }
+
+    fun paletteStyle(context: Context): String {
+        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getString(KEY_PALETTE_STYLE, "TonalSpot") ?: "TonalSpot"
+    }
+
+    fun setPaletteStyle(context: Context, value: String) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_PALETTE_STYLE, value)
+            .apply()
+    }
+
+    fun colorSpec(context: Context): String {
+        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getString(KEY_COLOR_SPEC, "Spec2025") ?: "Spec2025"
+    }
+
+    fun setColorSpec(context: Context, value: String) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_COLOR_SPEC, value)
+            .apply()
+    }
+
+    fun accentColor(context: Context): Int {
+        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getInt(KEY_ACCENT_COLOR, 0)
+    }
+
+    fun setAccentColor(context: Context, value: Int) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putInt(KEY_ACCENT_COLOR, value)
+            .apply()
+    }
+
+    fun blurEnabled(context: Context): Boolean {
+        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(KEY_BLUR_ENABLED, true)
+    }
+
+    fun setBlurEnabled(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_BLUR_ENABLED, enabled)
+            .apply()
+    }
+
+    fun observeBlurEnabled(context: Context, onChanged: (Boolean) -> Unit): () -> Unit {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == KEY_BLUR_ENABLED || key == null) onChanged(prefs.getBoolean(KEY_BLUR_ENABLED, true))
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        onChanged(prefs.getBoolean(KEY_BLUR_ENABLED, true))
+        return { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+
+    fun observeAccentColor(context: Context, onChanged: (Int) -> Unit): () -> Unit {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == KEY_ACCENT_COLOR || key == null) onChanged(prefs.getInt(KEY_ACCENT_COLOR, 0))
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        onChanged(prefs.getInt(KEY_ACCENT_COLOR, 0))
+        return { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+
+    fun observeColorSpec(context: Context, onChanged: (String) -> Unit): () -> Unit {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == KEY_COLOR_SPEC || key == null) onChanged(prefs.getString(KEY_COLOR_SPEC, "Spec2025") ?: "Spec2025")
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        onChanged(prefs.getString(KEY_COLOR_SPEC, "Spec2025") ?: "Spec2025")
+        return { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+
+    fun observePaletteStyle(context: Context, onChanged: (String) -> Unit): () -> Unit {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == KEY_PALETTE_STYLE || key == null) onChanged(prefs.getString(KEY_PALETTE_STYLE, "TonalSpot") ?: "TonalSpot")
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        onChanged(prefs.getString(KEY_PALETTE_STYLE, "TonalSpot") ?: "TonalSpot")
+        return { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+
+    fun observeColorMode(context: Context, onChanged: (Int) -> Unit): () -> Unit {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == KEY_COLOR_MODE || key == null) {
+                onChanged(prefs.getInt(KEY_COLOR_MODE, 0))
+            }
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        onChanged(prefs.getInt(KEY_COLOR_MODE, 0))
+        // The returned closure keeps the listener strongly referenced until disposal.
+        return { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+
+    fun navigationRailExpanded(context: Context): Boolean {
+        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(KEY_NAVIGATION_RAIL_EXPANDED, false)
+    }
+
+    fun setNavigationRailExpanded(context: Context, expanded: Boolean) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_NAVIGATION_RAIL_EXPANDED, expanded)
             .apply()
     }
 

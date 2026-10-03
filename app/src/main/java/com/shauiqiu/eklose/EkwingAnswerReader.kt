@@ -12,6 +12,11 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLDecoder
 import java.net.URLEncoder
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.job
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -191,6 +196,13 @@ object EkwingAnswerCacheStore {
     }
 }
 
+/** Failed/error cache entries are diagnostics, not successful standard answers. */
+internal fun canReuseAnswerCache(state: EkwingAnswerSourceState, paperKey: String): Boolean {
+    val sections = state.sectionsByPaperKey[paperKey] ?: return false
+    return state.parseStateByPaperKey[paperKey]?.status != EkwingAnswerParseStatus.Failed &&
+        sections.none { it.category == "error" }
+}
+
 object EkwingAnswerPrefetchManager {
     private const val CONCURRENCY = 3
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -217,7 +229,7 @@ object EkwingAnswerPrefetchManager {
             val existing = jobs[jobKey]
             if (existing?.isActive == true) return
             val currentState = EkwingAnswerState.sourceState(source)
-            if (currentState.sectionsByPaperKey.containsKey(paperKey)) {
+            if (canReuseAnswerCache(currentState, paperKey)) {
                 EkwingAnswerState.updateSource(source) {
                     it.copy(parseStateByPaperKey = it.parseStateByPaperKey + (paperKey to EkwingAnswerParseState(EkwingAnswerParseStatus.Ready)))
                 }
@@ -225,15 +237,26 @@ object EkwingAnswerPrefetchManager {
                 return
             }
             EkwingAnswerState.updateSource(source) {
-                it.copy(parseStateByPaperKey = it.parseStateByPaperKey + (paperKey to EkwingAnswerParseState(EkwingAnswerParseStatus.Pending)))
+                it.copy(
+                    sectionsByPaperKey = it.sectionsByPaperKey - paperKey,
+                    parseStateByPaperKey = it.parseStateByPaperKey + (paperKey to EkwingAnswerParseState(EkwingAnswerParseStatus.Pending)),
+                )
             }
             EkwingAnswerCacheStore.saveSourceState(context, source, EkwingAnswerState.sourceState(source))
-            jobs[jobKey] = scope.launch {
-                semaphore.withPermit {
-                    parseOne(context.applicationContext, source, paperKey)
+            val job = scope.launch(start = CoroutineStart.LAZY) {
+                try {
+                    semaphore.withPermit {
+                        parseOne(context.applicationContext, source, paperKey)
+                    }
+                } finally {
+                    val ownJob = coroutineContext.job
+                    synchronized(jobs) {
+                        if (jobs[jobKey] === ownJob) jobs.remove(jobKey)
+                    }
                 }
-                synchronized(jobs) { jobs.remove(jobKey) }
             }
+            jobs[jobKey] = job
+            job.start()
         }
     }
 
@@ -244,7 +267,7 @@ object EkwingAnswerPrefetchManager {
         }
     }
 
-    private fun parseOne(
+    private suspend fun parseOne(
         context: Context,
         source: EkwingAnswerSource,
         paperKey: String,
@@ -257,6 +280,7 @@ object EkwingAnswerPrefetchManager {
         val sections = runCatching {
             EkwingAnswerReader(context).readAnswerSections(source, paperKey)
         }.getOrElse { error ->
+            if (error is CancellationException) throw error
             val failed = EkwingAnswerAssembler.readFailureSection(error)
             EkwingAnswerState.updateSource(source) {
                 it.copy(
@@ -273,6 +297,7 @@ object EkwingAnswerPrefetchManager {
             return
         }
 
+        currentCoroutineContext().ensureActive()
         val parseState = if (sections.any { it.category == "error" }) {
             EkwingAnswerParseState(
                 status = EkwingAnswerParseStatus.Failed,

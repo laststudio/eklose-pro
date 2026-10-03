@@ -7,8 +7,10 @@ import android.widget.Toast
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
@@ -18,6 +20,7 @@ class EkloseApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         appContext = this
+        AppIntegrityGuard.ensureIntegrity(this)
         checkRemoteConfig()
     }
 
@@ -48,8 +51,8 @@ class EkloseApplication : Application() {
                         Log.i(TAG, "发现新版本: ${status.message}")
                     }
                     status.noticeMessage.isNotEmpty() -> {
-                        Log.i(TAG, "显示公告 Toast: ${status.noticeMessage}")
-                        Toast.makeText(this@EkloseApplication, status.noticeMessage, Toast.LENGTH_LONG).show()
+                        Log.i(TAG, "发布公告提示: ${status.noticeMessage}")
+                        _applicationNoticeFlow.tryEmit(status.noticeMessage)
                     }
                 }
             } catch (error: EkloseRemoteConfigManager.NetworkException) {
@@ -82,5 +85,8 @@ class EkloseApplication : Application() {
 
         private val _remoteStatusFlow = MutableStateFlow<EkloseRemoteStatus?>(null)
         val remoteStatusFlow: StateFlow<EkloseRemoteStatus?> = _remoteStatusFlow.asStateFlow()
+
+        private val _applicationNoticeFlow = MutableSharedFlow<String>(replay = 1, extraBufferCapacity = 1)
+        val applicationNoticeFlow = _applicationNoticeFlow.asSharedFlow()
     }
 }

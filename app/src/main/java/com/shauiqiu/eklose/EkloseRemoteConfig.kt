@@ -1,7 +1,6 @@
 package com.shauiqiu.eklose
 
 import android.content.Context
-import android.os.Build
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -54,11 +53,12 @@ object EkloseRemoteConfigManager {
     private const val TIMEOUT_MS = 5000L
     private const val CONFIG_FILE = "eklose_config.json"
     private val CONFIG_URLS = listOf(
+        "https://api.lastudio.cc/software/eklose/config",
         "https://raw.giteeusercontent.com/qiuqiqiuqid/fe_config/raw/master/$CONFIG_FILE",
         "https://raw.githubusercontent.com/laststudio/Fe_config/main/$CONFIG_FILE",
     )
     private const val DEFAULT_CHANGELOG_URL =
-        "https://raw.githubusercontent.com/laststudio/Fe_config/main/eklose_update.md"
+        "https://api.lastudio.cc/software/eklose/changelog"
 
     class NetworkException(message: String) : Exception(message)
 
@@ -188,11 +188,6 @@ object EkloseRemoteConfigManager {
 
     private fun Context.currentVersionCode(): Long {
         val packageInfo = packageManager.getPackageInfo(packageName, 0)
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            packageInfo.longVersionCode
-        } else {
-            @Suppress("DEPRECATION")
-            packageInfo.versionCode.toLong()
-        }
+        return packageInfo.longVersionCode
     }
 }

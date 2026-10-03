@@ -1,12 +1,20 @@
 package com.shauiqiu.eklose
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.add
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.consumeWindowInsets
@@ -14,6 +22,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
@@ -22,15 +32,31 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.dp
+import com.shauiqiu.eklose.ui.theme.EkloseAccentColor
+import com.shauiqiu.eklose.ui.theme.EkloseColorMode
+import com.shauiqiu.eklose.ui.theme.rememberEkloseAccentColor
+import com.shauiqiu.eklose.ui.theme.rememberEkloseBlurEnabled
+import com.shauiqiu.eklose.ui.theme.EkloseColorSpec
+import com.shauiqiu.eklose.ui.theme.rememberEkloseColorSpec
+import com.shauiqiu.eklose.ui.theme.rememberEkloseColorMode
+import com.shauiqiu.eklose.ui.theme.EklosePaletteStyle
 import com.shauiqiu.eklose.ui.theme.EkloseTheme
+import com.shauiqiu.eklose.ui.theme.LocalEkloseCardSurface
+import com.shauiqiu.eklose.ui.theme.LocalEklosePageBackground
+import com.shauiqiu.eklose.ui.theme.rememberEklosePaletteStyle
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.blur.layerBackdrop
+import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
+import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 class SettingsActivity : ComponentActivity() {
@@ -38,16 +64,59 @@ class SettingsActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            EkloseTheme {
-                SettingsScreen(onBack = ::finish)
+            val colorMode = rememberEkloseColorMode()
+            EkloseTheme(colorMode = colorMode) {
+                SettingsScreenRoute(onBack = ::finish)
             }
         }
     }
 }
 
 @Composable
-private fun SettingsScreen(onBack: () -> Unit) {
+internal fun SettingsScreenRoute(
+    onBack: () -> Unit,
+    embedded: Boolean = false,
+) {
     val context = LocalContext.current
+    val colorMode = rememberEkloseColorMode()
+    val paletteStyle = rememberEklosePaletteStyle()
+    val colorSpec = rememberEkloseColorSpec()
+    val accentColor = rememberEkloseAccentColor()
+    val blurEnabled = rememberEkloseBlurEnabled()
+    SettingsScreen(
+        onBack = onBack,
+        colorModeIndex = EkloseColorMode.entries.indexOf(colorMode),
+        paletteStyleIndex = EklosePaletteStyle.entries.indexOf(paletteStyle),
+        colorSpecIndex = EkloseColorSpec.entries.indexOf(colorSpec),
+        accentColorIndex = EkloseAccentColor.entries.indexOf(accentColor),
+        blurEnabled = blurEnabled,
+        onBlurEnabledChange = { EkwingLoginStore.setBlurEnabled(context, it) },
+        onAccentColorChange = { EkwingLoginStore.setAccentColor(context, EkloseAccentColor.entries[it].argb) },
+        onColorSpecChange = { EkwingLoginStore.setColorSpec(context, EkloseColorSpec.entries[it].value) },
+        onPaletteStyleChange = { EkwingLoginStore.setPaletteStyle(context, EklosePaletteStyle.entries[it].value) },
+        onColorModeChange = { EkwingLoginStore.setColorMode(context, EkloseColorMode.entries[it].storedValue) },
+        embedded = embedded,
+    )
+}
+
+@Composable
+internal fun SettingsScreen(
+    onBack: () -> Unit,
+    colorModeIndex: Int,
+    paletteStyleIndex: Int,
+    colorSpecIndex: Int,
+    accentColorIndex: Int,
+    blurEnabled: Boolean,
+    onBlurEnabledChange: (Boolean) -> Unit,
+    onAccentColorChange: (Int) -> Unit,
+    onColorSpecChange: (Int) -> Unit,
+    onPaletteStyleChange: (Int) -> Unit,
+    onColorModeChange: (Int) -> Unit,
+    embedded: Boolean = false,
+) {
+    val context = LocalContext.current
+    val scrollBehavior = MiuixScrollBehavior()
+    val blurBackdrop = rememberEkloseBlurBackdrop()
     var saveLogin by rememberSaveable { mutableStateOf(EkwingLoginStore.shouldSaveLogin(context)) }
     var basicApi by rememberSaveable { mutableStateOf(EkwingLoginStore.useBasicApi(context)) }
     var allPages by rememberSaveable { mutableStateOf(EkwingLoginStore.loadAllPages(context)) }
@@ -61,22 +130,19 @@ private fun SettingsScreen(onBack: () -> Unit) {
     var draftAliasTo by rememberSaveable { mutableStateOf(aliasTo) }
     var showRealNameAliasDialog by rememberSaveable { mutableStateOf(false) }
 
-    Scaffold(
-        modifier = Modifier.fillMaxSize(),
-        containerColor = MiuixTheme.colorScheme.surface,
-        topBar = {
-            EkloseTopBar(onBack = onBack)
-        },
-    ) { innerPadding ->
+    @Composable
+    fun SettingsBody(innerPadding: PaddingValues) {
         Surface(
             modifier = Modifier
                 .fillMaxSize()
                 .consumeWindowInsets(innerPadding)
-                .padding(innerPadding),
-            color = MiuixTheme.colorScheme.surface,
+                .padding(innerPadding)
+                .nestedScroll(scrollBehavior.nestedScrollConnection)
+                .let { if (!embedded && blurBackdrop != null) it.layerBackdrop(blurBackdrop) else it },
+            color = LocalEklosePageBackground.current,
             contentColor = MiuixTheme.colorScheme.onSurface,
         ) {
-            LazyColumn(
+            EkloseResponsiveList(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(horizontal = 18.dp, vertical = 14.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -149,16 +215,10 @@ private fun SettingsScreen(onBack: () -> Unit) {
                 item {
                     GroupSection(title = "界面") {
                         GroupItem(
-                            title = "悬浮导航栏",
-                            summary = "将底部导航栏显示为悬浮样式",
-                            trailing = {
-                                Switch(
-                                    checked = floatingNavigationBar,
-                                    onCheckedChange = {
-                                        floatingNavigationBar = it
-                                        EkwingLoginStore.setUseFloatingNavigationBar(context, it)
-                                    },
-                                )
+                            title = "主题",
+                            summary = "打开 KernelSU 风格主题页面",
+                            onClick = {
+                                context.startActivity(Intent(context, ThemeSettingsActivity::class.java))
                             },
                         )
                     }
@@ -180,6 +240,40 @@ private fun SettingsScreen(onBack: () -> Unit) {
             },
         )
     }
+
+    if (embedded) {
+        SettingsBody(PaddingValues())
+    } else {
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            containerColor = LocalEklosePageBackground.current,
+            contentWindowInsets = WindowInsets.systemBars
+                .add(WindowInsets.displayCutout)
+                .only(WindowInsetsSides.Horizontal),
+            topBar = {
+                EkloseBlurredBar(blurBackdrop) {
+                    EkloseTopBar(
+                        title = "设置",
+                        barColor = if (blurBackdrop != null) Color.Transparent else LocalEklosePageBackground.current,
+                        onBack = onBack,
+                        scrollBehavior = scrollBehavior,
+                    )
+                }
+            },
+        ) { innerPadding ->
+            SettingsBody(innerPadding)
+        }
+    }
+}
+
+@Composable
+private fun ThemePreviewDot(color: Color) {
+    Surface(
+        modifier = Modifier.size(22.dp),
+        shape = CircleShape,
+        color = color,
+        contentColor = Color.Transparent,
+    ) {}
 }
 
 @Composable

@@ -11,7 +11,6 @@ import android.graphics.Canvas
 import android.graphics.Color as AndroidColor
 import android.graphics.Paint
 import android.graphics.Typeface
-import android.os.Build
 import android.os.Environment
 import android.os.Bundle
 import android.provider.MediaStore
@@ -19,15 +18,23 @@ import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
 import android.util.Log
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.add
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.consumeWindowInsets
@@ -45,14 +52,19 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import com.shauiqiu.eklose.ui.theme.EkloseTheme
+import com.shauiqiu.eklose.ui.theme.LocalEkloseCardSurface
+import com.shauiqiu.eklose.ui.theme.LocalEklosePageBackground
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.DropdownEntry
@@ -61,6 +73,8 @@ import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.blur.layerBackdrop
+import top.yukonga.miuix.kmp.basic.SnackbarHostState
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
@@ -72,6 +86,8 @@ import top.yukonga.miuix.kmp.menu.OverlayIconDropdownMenu
 import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.utils.overScrollVertical
+import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 
 class AnswerActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -190,6 +206,9 @@ private fun AnswerScreen(
     val questionCount = answerSections.sumOf { it.questions.size }
     val topBarTitle = paperTitle.ifBlank { "答案" }
     val scrollBehavior = MiuixScrollBehavior()
+    val blurBackdrop = rememberEkloseBlurBackdrop()
+    val snackbarHostState = remember { SnackbarHostState() }
+    val snackbarScope = rememberCoroutineScope()
     val shareEntry = remember(paperTitle, answerSections, canShareAnswers) {
         DropdownEntry(
             items = listOf(
@@ -202,17 +221,19 @@ private fun AnswerScreen(
                             paperTitle = topBarTitle,
                             sections = shareableSections,
                         )
+                        snackbarScope.launch { snackbarHostState.showSnackbar("已复制答案到剪贴板") }
                     },
                 ),
                 DropdownItem(
                     text = "分享图片",
                     enabled = canShareAnswers,
                     onClick = {
-                        shareAnswerImage(
+                        val message = shareAnswerImage(
                             context = context,
                             paperTitle = topBarTitle,
                             sections = shareableSections,
                         )
+                        snackbarScope.launch { snackbarHostState.showSnackbar(message) }
                     },
                 ),
             ),
@@ -221,13 +242,20 @@ private fun AnswerScreen(
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
-        containerColor = MiuixTheme.colorScheme.surface,
+        containerColor = LocalEklosePageBackground.current,
+        contentWindowInsets = WindowInsets.systemBars
+            .add(WindowInsets.displayCutout)
+            .only(WindowInsetsSides.Horizontal),
+        snackbarHost = {
+            EkloseSnackbarHost(state = snackbarHostState)
+        },
         topBar = {
+            EkloseBlurredBar(blurBackdrop) {
             TopAppBar(
                 title = topBarTitle,
                 largeTitle = topBarTitle,
                 subtitle = "$questionCount 道题目",
-                color = MiuixTheme.colorScheme.surface,
+                color = if (blurBackdrop != null) Color.Transparent else LocalEklosePageBackground.current,
                 titleColor = MiuixTheme.colorScheme.onSurface,
                 largeTitleColor = MiuixTheme.colorScheme.onSurface,
                 scrollBehavior = scrollBehavior,
@@ -251,19 +279,28 @@ private fun AnswerScreen(
                     }
                 },
             )
+            }
         },
     ) { innerPadding ->
         Surface(
             modifier = Modifier
                 .fillMaxSize()
                 .consumeWindowInsets(innerPadding)
-                .padding(innerPadding),
-            color = MiuixTheme.colorScheme.surface,
+                .padding(innerPadding)
+                .let { if (blurBackdrop != null) it.layerBackdrop(blurBackdrop) else it },
+            color = LocalEklosePageBackground.current,
             contentColor = MiuixTheme.colorScheme.onSurface,
         ) {
-            LazyColumn(
+            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                val maxContentWidth = if (maxWidth >= EkloseLayoutBreakpoints.Expanded) 720.dp else maxWidth
+                LazyColumn(
                 modifier = Modifier
-                    .fillMaxSize()
+                    .align(Alignment.Center)
+                    .fillMaxHeight()
+                    .widthIn(max = maxContentWidth)
+                    .fillMaxWidth()
+                    .scrollEndHaptic()
+                    .overScrollVertical()
                     .nestedScroll(scrollBehavior.nestedScrollConnection),
                 contentPadding = PaddingValues(horizontal = 18.dp, vertical = 14.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -290,6 +327,7 @@ private fun AnswerScreen(
                             },
                         )
                     }
+                }
                 }
             }
             AnswerBottomSheet(
@@ -334,7 +372,6 @@ private fun copyAnswerText(
     val text = formatAnswerAsText(paperTitle, sections)
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     clipboard.setPrimaryClip(ClipData.newPlainText(paperTitle, text))
-    Toast.makeText(context, "已复制答案到剪贴板", Toast.LENGTH_SHORT).show()
 }
 
 private fun formatAnswerAsText(
@@ -361,8 +398,8 @@ private fun shareAnswerImage(
     context: Context,
     paperTitle: String,
     sections: List<AnswerSection>,
-) {
-    try {
+): String {
+    return try {
         val bitmap = renderAnswerImage(paperTitle, sections)
         val fileName = "YikePrincipal_Answer_${System.currentTimeMillis()}.png"
         val resolver = context.contentResolver
@@ -370,33 +407,27 @@ private fun shareAnswerImage(
             put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
             put(MediaStore.Images.Media.MIME_TYPE, "image/png")
             put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/翼课校长")
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                put(MediaStore.Images.Media.IS_PENDING, 1)
-            }
+            put(MediaStore.Images.Media.IS_PENDING, 1)
         }
         val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
         if (uri == null) {
             bitmap.recycle()
-            Toast.makeText(context, "保存失败", Toast.LENGTH_SHORT).show()
-            return
+            return "保存失败"
         }
-        resolver.openOutputStream(uri).use { output ->
-            if (output == null || !bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) {
-                bitmap.recycle()
-                Toast.makeText(context, "保存失败", Toast.LENGTH_SHORT).show()
-                return
-            }
+        val writeSucceeded = resolver.openOutputStream(uri).use { output ->
+            output != null && bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            resolver.update(
-                uri,
-                ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) },
-                null,
-                null,
-            )
+        if (!writeSucceeded) {
+            bitmap.recycle()
+            return "保存失败"
         }
+        resolver.update(
+            uri,
+            ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) },
+            null,
+            null,
+        )
         bitmap.recycle()
-        Toast.makeText(context, "已保存到图片/翼课校长", Toast.LENGTH_SHORT).show()
         val shareIntent = Intent(Intent.ACTION_SEND).apply {
             type = "image/png"
             putExtra(Intent.EXTRA_STREAM, uri)
@@ -405,12 +436,13 @@ private fun shareAnswerImage(
         }
         try {
             context.startActivity(Intent.createChooser(shareIntent, "分享图片"))
+            "已保存到图片/翼课校长"
         } catch (_: ActivityNotFoundException) {
-            Toast.makeText(context, "没有可用的分享应用", Toast.LENGTH_SHORT).show()
+            "已保存到图片/翼课校长，但没有可用的分享应用"
         }
     } catch (error: Exception) {
         Log.e("EkloseShareImage", "Share image failed", error)
-        Toast.makeText(context, "分享图片失败", Toast.LENGTH_SHORT).show()
+        "分享图片失败"
     }
 }
 
@@ -552,8 +584,8 @@ private fun AnswerSectionBlock(
         EkloseCard(
             modifier = Modifier.fillMaxWidth(),
             cornerRadius = EkloseCornerRadius.Container,
-            color = MiuixTheme.colorScheme.surfaceContainer,
-            contentColor = MiuixTheme.colorScheme.onSurfaceContainer,
+            color = LocalEklosePageBackground.current,
+            contentColor = MiuixTheme.colorScheme.onSurface,
         ) {
             Column(
                 modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
@@ -642,12 +674,20 @@ private fun QuestionBlock(
             title = "题目",
             content = question.question,
         )
-        ArrowPreference(
-            title = "答案",
-            summary = "点击查看标准答案",
-            onClick = onShowAnswer,
-            modifier = Modifier.fillMaxWidth(),
-        )
+        if (question.answer.isBlank()) {
+            GroupItem(
+                title = "答案",
+                summary = "暂无标准答案",
+                showArrow = false,
+            )
+        } else {
+            ArrowPreference(
+                title = "答案",
+                summary = "点击查看标准答案",
+                onClick = onShowAnswer,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 }
 
@@ -662,12 +702,16 @@ private fun AnswerBottomSheet(
         onDismissRequest = onDismiss,
     ) {
         if (selectedAnswer != null) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
+            BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                val maxContentWidth = if (maxWidth >= EkloseLayoutBreakpoints.Expanded) 720.dp else maxWidth
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .widthIn(max = maxContentWidth)
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
                 GroupItem(
                     title = selectedAnswer.sectionTitle,
                     summary = selectedAnswer.question.question,
@@ -678,7 +722,8 @@ private fun AnswerBottomSheet(
                     content = selectedAnswer.question.answer,
                     emphasized = true,
                 )
-                Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
             }
         }
     }

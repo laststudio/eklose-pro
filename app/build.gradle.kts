@@ -20,8 +20,8 @@ android {
 
     defaultConfig {
         applicationId = "com.shauiqiu.eklose"
-        minSdk = 26
-        targetSdk = 36
+        minSdk = 33
+        targetSdk = 37
         versionCode = 3
         versionName = "1.10"
 
@@ -41,7 +41,8 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             if (hasReleaseSigningConfig) {
                 signingConfig = signingConfigs.getByName("release")
             }
@@ -50,6 +51,17 @@ android {
                 "proguard-rules.pro"
             )
         }
+    }
+    packaging {
+        resources {
+            excludes += "META-INF/*.version"
+            excludes += "DebugProbesKt.bin"
+            excludes += "kotlin-tooling-metadata.json"
+        }
+    }
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
@@ -66,16 +78,20 @@ android {
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.activity.compose)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
+    implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
-    implementation(libs.androidx.compose.material3)
     implementation(libs.miuix.ui)
     implementation(libs.miuix.preference)
     implementation(libs.miuix.icons)
     implementation(libs.miuix.squircle)
+    implementation(libs.miuix.blur)
+    implementation(libs.material.kolor)
     testImplementation(libs.junit)
     testImplementation("org.json:json:20250517")
     androidTestImplementation(libs.androidx.junit)

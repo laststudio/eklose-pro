@@ -13,6 +13,12 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.add
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.consumeWindowInsets
@@ -31,11 +37,15 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.shauiqiu.eklose.ui.theme.EkloseTheme
+import com.shauiqiu.eklose.ui.theme.LocalEkloseCardSurface
+import com.shauiqiu.eklose.ui.theme.LocalEklosePageBackground
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -44,7 +54,10 @@ import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
+import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.blur.layerBackdrop
+import top.yukonga.miuix.kmp.basic.SnackbarHostState
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
@@ -93,6 +106,8 @@ private fun LoginScreen(
     onLoginSuccess: () -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val scrollBehavior = MiuixScrollBehavior()
+    val blurBackdrop = rememberEkloseBlurBackdrop()
     val client = remember { EkwingAuthClient(context) }
     val coroutineScope = rememberCoroutineScope()
     var mode by rememberSaveable { mutableStateOf(LoginMode.RealName) }
@@ -107,6 +122,12 @@ private fun LoginScreen(
     var schools by remember { mutableStateOf<List<EkwingSchool>>(emptyList()) }
     var showSchoolResults by remember { mutableStateOf(false) }
     var pendingOvername by remember { mutableStateOf<EkwingOvernameRequired?>(null) }
+    val snackbarHostState = remember { SnackbarHostState() }
+    LaunchedEffect(statusText) {
+        if (statusText.startsWith("搜索学校失败") || statusText.startsWith("登录失败") || statusText == "请选择同名账号") {
+            snackbarHostState.showSnackbar(statusText)
+        }
+    }
 
     LaunchedEffect(Unit) {
         if (EkwingLoginStore.shouldSaveLogin(context)) {
@@ -127,30 +148,34 @@ private fun LoginScreen(
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
-        containerColor = MiuixTheme.colorScheme.surface,
+        containerColor = LocalEklosePageBackground.current,
+        contentWindowInsets = WindowInsets.systemBars
+            .add(WindowInsets.displayCutout)
+            .only(WindowInsetsSides.Horizontal),
+        snackbarHost = {
+            EkloseSnackbarHost(state = snackbarHostState)
+        },
         topBar = {
-            EkloseTopBar(onBack = onBack)
+            EkloseBlurredBar(blurBackdrop) {
+                EkloseTopBar(title = "登录", barColor = if (blurBackdrop != null) Color.Transparent else LocalEklosePageBackground.current, onBack = onBack, scrollBehavior = scrollBehavior)
+            }
         },
     ) { innerPadding ->
         Surface(
             modifier = Modifier
                 .fillMaxSize()
                 .consumeWindowInsets(innerPadding)
-                .padding(innerPadding),
-            color = MiuixTheme.colorScheme.surface,
+                .padding(innerPadding)
+                .nestedScroll(scrollBehavior.nestedScrollConnection)
+                .let { if (blurBackdrop != null) it.layerBackdrop(blurBackdrop) else it },
+            color = LocalEklosePageBackground.current,
             contentColor = MiuixTheme.colorScheme.onSurface,
         ) {
-            LazyColumn(
+            EkloseResponsiveList(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(horizontal = 18.dp, vertical = 14.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                item {
-                    PageLead(
-                        title = "登录",
-                        summary = statusText,
-                    )
-                }
                 item {
                     GroupSection(title = "方式") {
                         OverlayDropdownPreference(
@@ -198,9 +223,7 @@ private fun LoginScreen(
                                                             client.searchSchools(schoolKeyword.trim())
                                                         }
                                                     }.onSuccess { result ->
-                                                        if (result.isNotEmpty()) {
-                                                            schools = result
-                                                        }
+                                                        if (result.isNotEmpty()) schools = result
                                                         showSchoolResults = result.isNotEmpty()
                                                         statusText = if (result.isEmpty()) {
                                                             "未搜索到学校"
@@ -244,31 +267,27 @@ private fun LoginScreen(
                                 ),
                             label = "SchoolResultsVisibility",
                         ) {
-                            Column {
-                                GroupSection(title = "学校搜索结果") {
-                                    schools.forEachIndexed { index, school ->
-                                        RadioButtonPreference(
-                                            title = school.schoolName,
-                                            summary = listOf(
-                                                "id=${school.schoolId}",
-                                                school.zone,
-                                            ).filter { it.isNotBlank() }.joinToString(" · "),
-                                            selected = schoolId == school.schoolId,
-                                            onClick = {
-                                                schoolName = school.schoolName
-                                                schoolId = school.schoolId
-                                                schoolKeyword = school.schoolName
-                                                statusText = "已选择学校：${school.schoolName}"
-                                            },
-                                        )
-                                        if (index != schools.lastIndex) {
-                                            GroupDivider()
-                                        }
-                                    }
+                            GroupSection(title = "学校搜索结果") {
+                                schools.forEachIndexed { index, school ->
+                                    RadioButtonPreference(
+                                        title = school.schoolName,
+                                        summary = listOf(
+                                            "id=${school.schoolId}",
+                                            school.zone,
+                                        ).filter { it.isNotBlank() }.joinToString(" · "),
+                                        selected = schoolId == school.schoolId,
+                                        onClick = {
+                                            schoolName = school.schoolName
+                                            schoolId = school.schoolId
+                                            schoolKeyword = school.schoolName
+                                            statusText = "已选择学校：${school.schoolName}"
+                                        },
+                                    )
+                                    if (index != schools.lastIndex) GroupDivider()
                                 }
-                                Spacer(modifier = Modifier.height(14.dp))
                             }
                         }
+                        Spacer(modifier = Modifier.height(14.dp))
                         GroupSection {
                             TextButton(
                                 text = if (isBusy) "处理中..." else mode.title,
@@ -286,7 +305,6 @@ private fun LoginScreen(
                                         statusText = validationError
                                         return@TextButton
                                     }
-
                                     isBusy = true
                                     statusText = "正在登录..."
                                     coroutineScope.launch {
@@ -432,8 +450,8 @@ private fun OvernameBottomSheet(
                         .fillMaxWidth()
                         .padding(horizontal = 18.dp),
                     cornerRadius = EkloseCornerRadius.Item,
-                    color = MiuixTheme.colorScheme.surfaceContainer,
-                    contentColor = MiuixTheme.colorScheme.onSurfaceContainer,
+                    color = LocalEkloseCardSurface.current,
+                    contentColor = MiuixTheme.colorScheme.onSurface,
                     borderAlpha = 0.12f,
                 ) {
                     BasicComponent(
