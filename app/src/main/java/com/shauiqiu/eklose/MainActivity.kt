@@ -439,8 +439,7 @@ private fun EkloseApp(openHomeRequest: Long = 0L) {
                 .fillMaxSize()
                 .consumeWindowInsets(innerPadding)
                 .padding(innerPadding)
-                .nestedScroll(scrollBehavior.nestedScrollConnection)
-                .let { if (blurBackdrop != null) it.layerBackdrop(blurBackdrop) else it },
+                .nestedScroll(scrollBehavior.nestedScrollConnection),
         ) {
             if (useNavigationRail) {
                 EkloseBlurredBar(blurBackdrop, blurActive = false) {
