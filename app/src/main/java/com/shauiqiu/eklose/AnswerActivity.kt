@@ -206,6 +206,7 @@ private fun AnswerScreen(
     val states by EkwingAnswerState.states.collectAsState()
     val sourceState = states[source] ?: EkwingAnswerSourceState()
     val classScoreReport = sourceState.classScoreReportByPaperKey[paperKey]
+        ?: sourceState.taskByPaperKey[paperKey]?.let { runCatching { JSONObject(it) }.getOrNull() }?.let { extractClassScoreReport(it) }
     var showClassRankBottomSheet by remember { mutableStateOf(false) }
     val parseState = sourceState.parseStateByPaperKey[paperKey]
     val loadedSections = sourceState.sectionsByPaperKey[paperKey]?.toUiAnswerSections()
@@ -336,7 +337,7 @@ private fun AnswerScreen(
                         )
                     }
                 }
-                if (classScoreReport != null && (classScoreReport.userRank != null || classScoreReport.ranks.isNotEmpty())) {
+                if (classScoreReport != null && (classScoreReport.userRank != null || classScoreReport.ranks.isNotEmpty() || !classScoreReport.userScore.isNullOrBlank())) {
                     item {
                         GroupSection(title = "考试成绩与班级排名") {
                             val userScoreText = classScoreReport.userScore?.ifBlank { null }
@@ -344,7 +345,7 @@ private fun AnswerScreen(
                                 ?: "暂无"
                             val userRankText = classScoreReport.userRank?.let { "第 $it 名" }
                                 ?: classScoreReport.ranks.firstOrNull { it.isSelf }?.let { "第 ${it.index} 名" }
-                                ?: "暂无"
+                                ?: if (classScoreReport.ranks.isNotEmpty()) "未入榜" else "未公布"
                             val classNameText = classScoreReport.className?.ifBlank { null }
                                 ?: classScoreReport.ranks.firstOrNull { it.className.isNotBlank() }?.className
                                 ?: "未指定班级"
@@ -383,20 +384,30 @@ private fun AnswerScreen(
                                             text = userRankText,
                                             style = MiuixTheme.textStyles.title2,
                                             fontWeight = FontWeight.Bold,
-                                            color = MiuixTheme.colorScheme.onSurfaceContainer,
+                                            color = if (userRankText == "未公布") {
+                                                MiuixTheme.colorScheme.onSurfaceVariantSummary
+                                            } else {
+                                                MiuixTheme.colorScheme.onSurfaceContainer
+                                            },
                                         )
                                     }
                                 }
-                                Text(
-                                    text = "班级：$classNameText",
-                                    style = MiuixTheme.textStyles.body2,
-                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                                )
+                                if (classNameText != "未指定班级") {
+                                    Text(
+                                        text = "班级：$classNameText",
+                                        style = MiuixTheme.textStyles.body2,
+                                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                    )
+                                }
                             }
                             GroupDivider()
                             ArrowPreference(
                                 title = "全班成绩榜单",
-                                summary = if (classScoreReport.ranks.isNotEmpty()) "共 ${classScoreReport.ranks.size} 名学生，点击查看榜单" else "点击查看成绩榜单",
+                                summary = if (classScoreReport.ranks.isNotEmpty()) {
+                                    "共 ${classScoreReport.ranks.size} 名学生，点击查看榜单"
+                                } else {
+                                    "本次考试未开放全班排名榜单"
+                                },
                                 onClick = { showClassRankBottomSheet = true },
                                 modifier = Modifier.fillMaxWidth(),
                             )
@@ -898,13 +909,14 @@ private fun ClassRankBottomSheet(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                 ) {
-                                    report.userRank?.let {
-                                        Text(
-                                            text = "我的排名：第 $it 名",
-                                            style = MiuixTheme.textStyles.body2,
-                                            color = MiuixTheme.colorScheme.onSurface,
-                                        )
-                                    }
+                                    val myRankText = report.userRank?.let { "我的排名：第 $it 名" }
+                                        ?: report.ranks.firstOrNull { it.isSelf }?.let { "我的排名：第 ${it.index} 名" }
+                                        ?: "我的排名：未公布"
+                                    Text(
+                                        text = myRankText,
+                                        style = MiuixTheme.textStyles.body2,
+                                        color = MiuixTheme.colorScheme.onSurface,
+                                    )
                                     report.userScore?.takeIf { it.isNotBlank() }?.let {
                                         Text(
                                             text = "我的分数：$it",
@@ -978,12 +990,31 @@ private fun ClassRankBottomSheet(
                     }
                 } else {
                     item {
-                        Text(
-                            text = "暂无具体榜单信息",
-                            style = MiuixTheme.textStyles.body2,
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                            modifier = Modifier.padding(vertical = 16.dp),
-                        )
+                        EkloseCard(
+                            modifier = Modifier.fillMaxWidth(),
+                            cornerRadius = EkloseCornerRadius.Nested,
+                            color = MiuixTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            contentColor = MiuixTheme.colorScheme.onSurface,
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 14.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                Text(
+                                    text = "本次考试未开放全班排名数据",
+                                    style = MiuixTheme.textStyles.body1,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MiuixTheme.colorScheme.onSurface,
+                                )
+                                Text(
+                                    text = "教师或考试系统未发布全班成绩榜单，仅提供个人考试成绩。",
+                                    style = MiuixTheme.textStyles.body2,
+                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                )
+                            }
+                        }
                     }
                 }
                 item { Spacer(modifier = Modifier.height(16.dp)) }

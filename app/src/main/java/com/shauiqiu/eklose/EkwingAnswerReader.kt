@@ -551,6 +551,7 @@ class EkwingAnswerReader(private val context: Context) {
         }
         val paperKeys = papers.map { it.key }.toSet()
         val sectionsByPaperKey = oldState.sectionsByPaperKey.filterKeys { it in paperKeys }
+        val classScoreReportByPaperKey = oldState.classScoreReportByPaperKey.filterKeys { it in paperKeys }
         val parseStateByPaperKey = papers.associate { paper ->
             val existing = oldState.parseStateByPaperKey[paper.key]
             val state = when {
@@ -566,6 +567,7 @@ class EkwingAnswerReader(private val context: Context) {
             taskByPaperKey = taskByPaperKey,
             sectionsByPaperKey = sectionsByPaperKey,
             parseStateByPaperKey = parseStateByPaperKey,
+            classScoreReportByPaperKey = classScoreReportByPaperKey,
         )
         EkwingAnswerState.setSourceState(source, newState)
         EkwingAnswerCacheStore.saveSourceState(context, source, newState)
@@ -587,7 +589,23 @@ class EkwingAnswerReader(private val context: Context) {
         paperKey: String,
     ): List<EkwingAnswerSection> {
         val cachedSections = EkwingAnswerState.sourceState(source).sectionsByPaperKey[paperKey]
-        if (cachedSections != null) return cachedSections
+        val cachedReport = EkwingAnswerState.sourceState(source).classScoreReportByPaperKey[paperKey]
+        if (cachedSections != null) {
+            if (cachedReport == null) {
+                val examText = EkwingAnswerState.sourceState(source).taskByPaperKey[paperKey]
+                val task = examText?.let { runCatching { JSONObject(it) }.getOrNull() }
+                if (task != null) {
+                    val report = extractClassScoreReport(task)
+                    if (report != null) {
+                        EkwingAnswerState.updateSource(source) { state ->
+                            state.copy(classScoreReportByPaperKey = state.classScoreReportByPaperKey + (paperKey to report))
+                        }
+                        EkwingAnswerCacheStore.saveSourceState(context, source, EkwingAnswerState.sourceState(source))
+                    }
+                }
+            }
+            return cachedSections
+        }
 
         val examText = EkwingAnswerState.sourceState(source).taskByPaperKey[paperKey]
             ?: throw RuntimeException("未找到任务，请先读取任务列表")
@@ -899,12 +917,13 @@ class EkwingAnswerReader(private val context: Context) {
             throw RuntimeException("考试成绩读取失败：${error.message}")
         }
 
-        val classReport = extractClassScoreReport(scoreInfo)
+        val classReport = extractClassScoreReport(scoreInfo, exam)
         if (classReport != null) {
             val key = paperKey ?: exam.answerPaperKey()
             EkwingAnswerState.updateSource(source) { state ->
                 state.copy(classScoreReportByPaperKey = state.classScoreReportByPaperKey + (key to classReport))
             }
+            EkwingAnswerCacheStore.saveSourceState(context, source, EkwingAnswerState.sourceState(source))
         }
 
         val modelScoreInfos = fetchModelScoreInfos(session, selfId, scoreInfo)
@@ -1944,47 +1963,73 @@ internal fun parseScoreInfoExamSections(
     return emptyList()
 }
 
-internal fun extractClassScoreReport(scoreInfo: Any?): EkwingClassScoreReport? {
-    val root = normalizeJson(scoreInfo) ?: return null
+internal fun extractClassScoreReport(vararg sources: Any?): EkwingClassScoreReport? {
     val candidates = mutableListOf<JSONObject>()
+    val visited = mutableSetOf<Int>()
+
     fun collect(value: Any?, depth: Int) {
-        if (depth > 6) return
-        when (val normalized = normalizeJson(value)) {
+        if (depth > 8 || value == null) return
+        val normalized = normalizeJson(value) ?: return
+        when (normalized) {
             is JSONArray -> {
                 for (i in 0 until normalized.length()) {
                     collect(normalized.opt(i), depth + 1)
                 }
             }
             is JSONObject -> {
+                val id = System.identityHashCode(normalized)
+                if (!visited.add(id)) return
                 candidates += normalized
+
                 normalized.optJSONArray("useful_candidates")?.let { arr ->
                     for (i in 0 until arr.length()) collect(arr.opt(i), depth + 1)
                 }
+                normalized.optJSONArray("candidates")?.let { arr ->
+                    for (i in 0 until arr.length()) collect(arr.opt(i), depth + 1)
+                }
                 normalized.opt("data")?.let { collect(it, depth + 1) }
+                normalized.opt("report")?.let { collect(it, depth + 1) }
+                normalized.opt("score_info")?.let { collect(it, depth + 1) }
+                normalized.opt("exam_item")?.let { collect(it, depth + 1) }
+                normalized.opt("self_info")?.let { collect(it, depth + 1) }
+                normalized.opt("exam")?.let { collect(it, depth + 1) }
             }
         }
     }
-    collect(root, 0)
+
+    for (src in sources) {
+        collect(src, 0)
+    }
+
+    var bestRankItems = emptyList<EkwingClassRankItem>()
+    var bestUserRank: Int? = null
+    var bestUserScore: String? = null
+    var bestClassName: String? = null
+
+    val rankArrayKeys = listOf(
+        "self_ranks", "rank_list", "ranking_list", "ranks", "class_ranks",
+        "rankList", "exam_rank", "exam_ranks", "score_ranks", "list"
+    )
 
     for (candidate in candidates) {
-        val selfRanksJson = candidate.optJSONArray("self_ranks")
-        val hasUserRank = candidate.has("user_rank")
-        if (selfRanksJson == null && !hasUserRank) continue
+        for (key in rankArrayKeys) {
+            val arr = candidate.optJSONArray(key) ?: continue
+            if (arr.length() == 0) continue
 
-        val rankItems = mutableListOf<EkwingClassRankItem>()
-        if (selfRanksJson != null) {
-            for (i in 0 until selfRanksJson.length()) {
-                val item = selfRanksJson.optJSONObject(i) ?: continue
+            val parsedItems = mutableListOf<EkwingClassRankItem>()
+            for (i in 0 until arr.length()) {
+                val item = arr.optJSONObject(i) ?: continue
                 val userInfo = item.optJSONObject("user_info")
-                val isSelf = when (val v = item.opt("is_self")) {
+                val isSelf = when (val v = item.opt("is_self") ?: item.opt("isSelf") ?: item.opt("self")) {
                     is Boolean -> v
                     is Number -> v.toInt() == 1
                     is String -> v == "1" || v.equals("true", ignoreCase = true)
                     null -> false
                     else -> false
                 }
-                val index = item.optInt("index", -1).takeIf { it >= 0 }
-                    ?: item.optInt("rank", -1).takeIf { it >= 0 }
+                val index = item.optInt("index", -1).takeIf { it > 0 }
+                    ?: item.optInt("rank", -1).takeIf { it > 0 }
+                    ?: item.optInt("order", -1).takeIf { it > 0 }
                     ?: (i + 1)
                 val name = firstNonBlank(
                     item.optString("real_name"),
@@ -1993,8 +2038,14 @@ internal fun extractClassScoreReport(scoreInfo: Any?): EkwingClassScoreReport? {
                     userInfo?.optString("name"),
                     item.optString("nicename"),
                     item.optString("name"),
+                    item.optString("uname"),
                 ) ?: ""
-                val score = firstNonBlank(item.optString("score"), item.optString("user_score")) ?: ""
+                val score = firstNonBlank(
+                    item.optString("score"),
+                    item.optString("user_score"),
+                    item.optString("stu_score"),
+                    item.optString("total_score")
+                ) ?: ""
                 val className = firstNonBlank(
                     userInfo?.optString("classes"),
                     userInfo?.optString("class_name"),
@@ -2010,41 +2061,60 @@ internal fun extractClassScoreReport(scoreInfo: Any?): EkwingClassScoreReport? {
                     item.optString("studentNo"),
                 ) ?: ""
 
-                rankItems += EkwingClassRankItem(
-                    index = index,
-                    name = name,
-                    score = score,
-                    isSelf = isSelf,
-                    className = className,
-                    studentNo = studentNo,
-                )
+                if (name.isNotBlank() || score.isNotBlank()) {
+                    parsedItems += EkwingClassRankItem(
+                        index = index,
+                        name = name,
+                        score = score,
+                        isSelf = isSelf,
+                        className = className,
+                        studentNo = studentNo,
+                    )
+                }
+            }
+
+            if (parsedItems.size > bestRankItems.size) {
+                bestRankItems = parsedItems
             }
         }
 
-        val selfItem = rankItems.firstOrNull { it.isSelf }
-
         val userRankRaw = candidate.opt("user_rank")
+            ?: candidate.opt("userRank")
+            ?: candidate.opt("class_rank")
+            ?: candidate.opt("classRank")
+            ?: candidate.opt("self_rank")
+            ?: candidate.opt("selfRank")
+            ?: candidate.opt("my_rank")
+            ?: candidate.opt("rank")
         val userRankObj = userRankRaw as? JSONObject
-        val userRank = when {
+        val parsedRank = when {
             userRankObj != null -> {
                 userRankObj.optInt("rank", -1).takeIf { it > 0 }
                     ?: userRankObj.optInt("user_rank", -1).takeIf { it > 0 }
                     ?: userRankObj.optInt("index", -1).takeIf { it > 0 }
             }
-            userRankRaw is Number -> userRankRaw.toInt()
-            userRankRaw is String -> userRankRaw.toIntOrNull()
+            userRankRaw is Number -> userRankRaw.toInt().takeIf { it > 0 }
+            userRankRaw is String -> userRankRaw.toIntOrNull()?.takeIf { it > 0 }
             else -> null
-        } ?: selfItem?.index ?: candidate.optInt("rank", -1).takeIf { it > 0 }
+        }
+        if (bestUserRank == null && parsedRank != null) {
+            bestUserRank = parsedRank
+        }
 
-        val userScore = firstNonBlank(
+        val parsedScore = firstNonBlank(
             userRankObj?.optString("score"),
             userRankObj?.optString("user_score"),
             candidate.optString("user_score"),
+            candidate.optString("self_score"),
             candidate.optString("score"),
-            selfItem?.score,
+            candidate.optString("stu_score"),
+            candidate.optString("get_score"),
         )
+        if (bestUserScore.isNullOrBlank() && !parsedScore.isNullOrBlank()) {
+            bestUserScore = parsedScore
+        }
 
-        val className = firstNonBlank(
+        val parsedClass = firstNonBlank(
             userRankObj?.optString("classes"),
             userRankObj?.optString("className"),
             userRankObj?.optJSONObject("user_info")?.optString("classes"),
@@ -2052,17 +2122,25 @@ internal fun extractClassScoreReport(scoreInfo: Any?): EkwingClassScoreReport? {
             candidate.optString("className"),
             candidate.optString("class_name"),
             candidate.optJSONObject("user_info")?.optString("classes"),
-            selfItem?.className,
         )
-
-        if (userRank != null || userScore != null || className != null || rankItems.isNotEmpty()) {
-            return EkwingClassScoreReport(
-                userRank = userRank,
-                userScore = userScore,
-                className = className,
-                ranks = rankItems,
-            )
+        if (bestClassName.isNullOrBlank() && !parsedClass.isNullOrBlank()) {
+            bestClassName = parsedClass
         }
+    }
+
+    val selfItem = bestRankItems.firstOrNull { it.isSelf }
+    val finalUserRank = bestUserRank ?: selfItem?.index
+    val finalUserScore = bestUserScore ?: selfItem?.score?.ifBlank { null }
+    val finalClassName = bestClassName ?: selfItem?.className?.ifBlank { null }
+        ?: bestRankItems.firstOrNull { it.className.isNotBlank() }?.className
+
+    if (finalUserRank != null || !finalUserScore.isNullOrBlank() || !finalClassName.isNullOrBlank() || bestRankItems.isNotEmpty()) {
+        return EkwingClassScoreReport(
+            userRank = finalUserRank,
+            userScore = finalUserScore,
+            className = finalClassName,
+            ranks = bestRankItems,
+        )
     }
     return null
 }
@@ -2306,13 +2384,35 @@ private fun extractEmbeddedJson(text: String): Any? {
 
 internal fun extractScoreJsonFromText(text: String): Any? {
     val decoded = decodeHtmlEntities(repairMojibakeText(text))
-    extractJsonParseCandidates(decoded)
-        .firstOrNull(::hasExamAnswerJson)
-        ?.let { return normalizeJson(it) }
-    extractRawJsonCandidates(decoded, maxCandidates = 80)
-        .firstOrNull(::hasExamAnswerJson)
-        ?.let { return normalizeJson(it) }
-    return null
+    val parseCandidates = extractJsonParseCandidates(decoded)
+    val rawCandidates = extractRawJsonCandidates(decoded, maxCandidates = 80)
+    val allCandidates = (parseCandidates + rawCandidates).mapNotNull { normalizeJson(it) }
+
+    val useful = allCandidates.filter { candidate ->
+        hasExamAnswerJson(candidate) || extractClassScoreReport(candidate) != null
+    }
+
+    if (useful.isEmpty() && allCandidates.isEmpty()) return null
+
+    val selected = useful.ifEmpty { allCandidates }
+    if (selected.size == 1 && selected.first() is JSONObject) {
+        return selected.first()
+    }
+
+    val root = JSONObject()
+    val usefulArray = JSONArray()
+    useful.take(20).forEach { usefulArray.put(it) }
+    val candidatesArray = JSONArray()
+    allCandidates.take(40).forEach { candidatesArray.put(it) }
+    root.put("useful_candidates", usefulArray)
+    root.put("candidates", candidatesArray)
+
+    selected.firstOrNull { it is JSONObject }?.let { firstObj ->
+        (firstObj as JSONObject).keys().forEach { key ->
+            if (!root.has(key)) root.put(key, firstObj.get(key))
+        }
+    }
+    return root
 }
 
 private fun extractJsonParseCandidates(text: String): List<Any> {
