@@ -223,12 +223,6 @@ private fun AnnouncementScreen(
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 item {
-                    PageLead(
-                        title = "公告与更新",
-                        summary = "查看重要提示和最近变化",
-                    )
-                }
-                item {
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
                         color = Color.Transparent,

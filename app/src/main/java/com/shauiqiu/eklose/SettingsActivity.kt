@@ -157,12 +157,6 @@ internal fun SettingsScreen(
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 item {
-                    PageLead(
-                        title = "设置",
-                        summary = "管理登录缓存和任务列表",
-                    )
-                }
-                item {
                     GroupSection(title = "账号与列表") {
                         GroupItem(
                             title = "保存登录状态",

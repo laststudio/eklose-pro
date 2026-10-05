@@ -360,7 +360,11 @@ private fun EkloseApp(openHomeRequest: Long = 0L) {
         topBar = {
             EkloseBlurredBar(blurBackdrop) {
                 EkloseTopBar(
-                    title = if (selectedPage == RootPage.Settings) "设置" else "翼课校长",
+                    title = when (selectedPage) {
+                        RootPage.Home -> "翼课校长"
+                        RootPage.Reader -> "读取"
+                        RootPage.Settings -> "设置"
+                    },
                     scrollBehavior = scrollBehavior,
                     barColor = if (blurBackdrop != null) Color.Transparent else LocalEklosePageBackground.current,
                 )
@@ -1242,16 +1246,6 @@ private fun ReaderPage(
                 ),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                item {
-                    PageLead(
-                        title = "读取",
-                        summary = when {
-                            readerSummary != null -> readerSummary
-                            isReading -> "正在读取${homeworkScope.label}..."
-                            else -> homeworkScope.readerSummary
-                        },
-                    )
-                }
                 item {
                     GroupSection {
                         OverlayDropdownPreference(

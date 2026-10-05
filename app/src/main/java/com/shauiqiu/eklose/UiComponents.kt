@@ -289,7 +289,7 @@ internal fun EkloseCard(
             contentColor = contentColor,
         ),
         showIndication = onClick != null,
-        pressFeedbackType = PressFeedbackType.Sink,
+        pressFeedbackType = PressFeedbackType.None,
         onClick = onClick,
         content = content,
     )
@@ -353,7 +353,7 @@ fun EkloseWarningCard(
         modifier = modifier.fillMaxWidth(),
         onClick = { onClick?.invoke() },
         showIndication = onClick != null,
-        pressFeedbackType = PressFeedbackType.Sink,
+        pressFeedbackType = PressFeedbackType.None,
         colors = CardDefaults.defaultColors(
             color = MiuixTheme.colorScheme.errorContainer,
             contentColor = MiuixTheme.colorScheme.onErrorContainer,
