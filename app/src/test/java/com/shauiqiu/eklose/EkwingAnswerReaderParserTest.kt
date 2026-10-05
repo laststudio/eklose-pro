@@ -5,6 +5,7 @@ import org.json.JSONArray
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -2004,5 +2005,83 @@ class EkwingAnswerReaderParserTest {
         assertEquals(1, restoredReport?.ranks?.size)
         assertEquals("学霸", restoredReport?.ranks?.first()?.name)
         assertTrue(restoredReport?.ranks?.first()?.isSelf == true)
+    }
+
+    @Test
+    fun extractClassScoreReportFromExamWithoutRankList() {
+        val examData = JSONObject(
+            """
+            {
+              "self_id": "12345",
+              "title": "(new)广州八上Unit 3听说题1",
+              "score": "28",
+              "status": "1"
+            }
+            """.trimIndent()
+        )
+        val report = extractClassScoreReport(examData)
+        assertNotNull(report)
+        assertEquals("28", report?.userScore)
+        assertNull(report?.userRank)
+        assertTrue(report?.ranks.isNullOrEmpty())
+    }
+
+    @Test
+    fun extractClassScoreReportWithRankListAndMultipleSources() {
+        val scoreInfo = JSONObject(
+            """
+            {
+              "rank_list": [
+                {
+                  "index": 1,
+                  "real_name": "学霸",
+                  "score": "30",
+                  "is_self": false
+                },
+                {
+                  "index": 2,
+                  "real_name": "自己",
+                  "score": "28",
+                  "is_self": true
+                }
+              ]
+            }
+            """.trimIndent()
+        )
+        val exam = JSONObject(
+            """
+            {
+              "self_id": "999",
+              "classes": "八年级(2)班"
+            }
+            """.trimIndent()
+        )
+        val report = extractClassScoreReport(scoreInfo, exam)
+        assertNotNull(report)
+        assertEquals(2, report?.userRank)
+        assertEquals("28", report?.userScore)
+        assertEquals("八年级(2)班", report?.className)
+        assertEquals(2, report?.ranks?.size)
+    }
+
+    @Test
+    fun extractScoreJsonFromTextPreservesHtmlScoreAndRankCandidates() {
+        val html = """
+            <html>
+            <head><title>考试详情</title></head>
+            <body>
+            <script>
+            var modelData = JSON.parse('{"model_info": {"model_type": "1", "name": "模仿朗读"}}');
+            var rankData = JSON.parse('{"user_rank": {"rank": 3, "score": "28"}, "self_ranks": [{"index": 3, "real_name": "测试", "score": "28", "is_self": 1}]}');
+            </script>
+            </body>
+            </html>
+        """.trimIndent()
+        val json = extractScoreJsonFromText(html)
+        assertNotNull(json)
+        val report = extractClassScoreReport(json)
+        assertNotNull(report)
+        assertEquals(3, report?.userRank)
+        assertEquals("28", report?.userScore)
     }
 }
