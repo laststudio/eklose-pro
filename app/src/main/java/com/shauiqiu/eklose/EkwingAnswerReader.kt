@@ -66,6 +66,22 @@ data class EkwingAnswerQuestion(
     val answer: String,
 )
 
+data class EkwingClassRankItem(
+    val index: Int,
+    val name: String,
+    val score: String,
+    val isSelf: Boolean,
+    val className: String = "",
+    val studentNo: String = "",
+)
+
+data class EkwingClassScoreReport(
+    val userRank: Int?,
+    val userScore: String?,
+    val className: String?,
+    val ranks: List<EkwingClassRankItem>,
+)
+
 enum class EkwingAnswerSource(
     val cacheKey: String,
 ) {
@@ -98,6 +114,7 @@ data class EkwingAnswerSourceState(
     val taskByPaperKey: Map<String, String> = emptyMap(),
     val sectionsByPaperKey: Map<String, List<EkwingAnswerSection>> = emptyMap(),
     val parseStateByPaperKey: Map<String, EkwingAnswerParseState> = emptyMap(),
+    val classScoreReportByPaperKey: Map<String, EkwingClassScoreReport> = emptyMap(),
 )
 
 internal fun canOpenPaper(parseState: EkwingAnswerParseState?): Boolean {
@@ -125,6 +142,11 @@ object EkwingAnswerState {
         get() = sourceState(EkwingAnswerSource.Current).sectionsByPaperKey
         set(value) {
             updateSource(EkwingAnswerSource.Current) { it.copy(sectionsByPaperKey = value) }
+        }
+    var classScoreReportByPaperKey: Map<String, EkwingClassScoreReport>
+        get() = sourceState(EkwingAnswerSource.Current).classScoreReportByPaperKey
+        set(value) {
+            updateSource(EkwingAnswerSource.Current) { it.copy(classScoreReportByPaperKey = value) }
         }
 
     fun sourceState(source: EkwingAnswerSource): EkwingAnswerSourceState {
@@ -305,6 +327,11 @@ internal fun sourceStateToJson(state: EkwingAnswerSourceState): JSONObject {
         put("parseStateByPaperKey", JSONObject().apply {
             state.parseStateByPaperKey.forEach { (key, value) -> put(key, value.toJson()) }
         })
+        put("classScoreReportByPaperKey", JSONObject().apply {
+            state.classScoreReportByPaperKey.forEach { (key, report) ->
+                put(key, report.toJson())
+            }
+        })
     }
 }
 
@@ -323,12 +350,65 @@ internal fun sourceStateFromJson(value: JSONObject): EkwingAnswerSourceState {
             root.optJSONObject(key)?.toParseState()?.let { parseStateByPaperKey[key] = it }
         }
     }
+    val classScoreReportByPaperKey = mutableMapOf<String, EkwingClassScoreReport>()
+    value.optJSONObject("classScoreReportByPaperKey")?.let { root ->
+        root.keys().forEach { key ->
+            root.optJSONObject(key)?.toClassScoreReport()?.let {
+                classScoreReportByPaperKey[key] = it
+            }
+        }
+    }
     val readyStates = sectionsByPaperKey.keys.associateWith { EkwingAnswerParseState(EkwingAnswerParseStatus.Ready) }
     return EkwingAnswerSourceState(
         papers = papers,
         taskByPaperKey = taskByPaperKey,
         sectionsByPaperKey = sectionsByPaperKey,
         parseStateByPaperKey = parseStateByPaperKey + readyStates,
+        classScoreReportByPaperKey = classScoreReportByPaperKey,
+    )
+}
+
+internal fun EkwingClassScoreReport.toJson(): JSONObject {
+    return JSONObject().apply {
+        userRank?.let { put("userRank", it) }
+        userScore?.let { put("userScore", it) }
+        className?.let { put("className", it) }
+        put("ranks", JSONArray().apply { ranks.forEach { put(it.toJson()) } })
+    }
+}
+
+internal fun JSONObject.toClassScoreReport(): EkwingClassScoreReport {
+    val userRank = if (has("userRank") && !isNull("userRank")) optInt("userRank") else null
+    val userScore = optString("userScore").takeIf { it.isNotBlank() }
+    val className = optString("className").takeIf { it.isNotBlank() }
+    val ranks = optJSONArray("ranks")?.jsonObjects()?.map { it.toClassRankItem() }.orEmpty()
+    return EkwingClassScoreReport(
+        userRank = userRank,
+        userScore = userScore,
+        className = className,
+        ranks = ranks,
+    )
+}
+
+internal fun EkwingClassRankItem.toJson(): JSONObject {
+    return JSONObject().apply {
+        put("index", index)
+        put("name", name)
+        put("score", score)
+        put("isSelf", isSelf)
+        put("className", className)
+        put("studentNo", studentNo)
+    }
+}
+
+internal fun JSONObject.toClassRankItem(): EkwingClassRankItem {
+    return EkwingClassRankItem(
+        index = optInt("index"),
+        name = optString("name"),
+        score = optString("score"),
+        isSelf = optBoolean("isSelf"),
+        className = optString("className"),
+        studentNo = optString("studentNo"),
     )
 }
 
@@ -493,7 +573,11 @@ class EkwingAnswerReader(private val context: Context) {
             ?: throw RuntimeException("请先登录翼课账号")
         val useBasic = EkwingLoginStore.useBasicApi(context)
         val sections = runCatching {
-            if (source.isHomework) readHomeworkSections(session, task, useBasic) else readExamSections(session, task, useBasic)
+            if (source.isHomework) {
+                readHomeworkSections(session, task, useBasic, source = source, paperKey = paperKey)
+            } else {
+                readExamSections(session, task, useBasic, source = source, paperKey = paperKey)
+            }
         }.getOrElse { error ->
             listOf(EkwingAnswerAssembler.readFailureSection(error))
         }
@@ -701,7 +785,12 @@ class EkwingAnswerReader(private val context: Context) {
         session: EkwingLoginSession,
         homework: JSONObject,
         useBasic: Boolean,
+        source: EkwingAnswerSource = EkwingAnswerSource.HomeworkCurrent,
+        paperKey: String? = null,
     ): List<EkwingAnswerSection> {
+        if (isExamPayload(homework)) {
+            return readExamSections(session, homework, useBasic, source = source, paperKey = paperKey)
+        }
         val detailItems = getDetailItems(session, homework, useBasic)
         if (detailItems.isEmpty()) {
             return listOf(
@@ -714,7 +803,15 @@ class EkwingAnswerReader(private val context: Context) {
             )
         }
 
-        return detailItems.mapIndexed { index, item ->
+        return detailItems.flatMapIndexed { index, item ->
+            if (isExamPayload(item)) {
+                val examSections = runCatching {
+                    readExamSections(session, item, useBasic, source = source)
+                }.getOrNull()
+                if (!examSections.isNullOrEmpty()) {
+                    return@flatMapIndexed examSections
+                }
+            }
             val contentQuestions = fetchContentQuestions(session, homework, item)
             val itemAnswers = parseAnswerQuestions(item)
             val fetchedAnswers = fetchAnswers(session, homework, item)
@@ -725,25 +822,27 @@ class EkwingAnswerReader(private val context: Context) {
                 item.optString("title"),
                 "小项 ${index + 1}",
             ) ?: "小项 ${index + 1}"
-            EkwingAnswerSection(
-                title = title,
-                category = firstNonBlank(item.optString("tk_biz"), item.optString("type")) ?: "answer",
-                originalText = firstNonBlank(
-                    item.optString("name"),
-                    item.optString("title"),
-                    contentQuestions.firstOrNull()?.question,
-                    item.optString("type_name"),
-                    "已读取翼课作业小项",
-                ) ?: "已读取翼课作业小项",
-                questions = questions.ifEmpty {
-                    listOf(
-                        EkwingAnswerQuestion(
-                            order = "Q${index + 1}",
-                            question = title,
-                            answer = "未解析到标准答案",
+            listOf(
+                EkwingAnswerSection(
+                    title = title,
+                    category = firstNonBlank(item.optString("tk_biz"), item.optString("type")) ?: "answer",
+                    originalText = firstNonBlank(
+                        item.optString("name"),
+                        item.optString("title"),
+                        contentQuestions.firstOrNull()?.question,
+                        item.optString("type_name"),
+                        "已读取翼课作业小项",
+                    ) ?: "已读取翼课作业小项",
+                    questions = questions.ifEmpty {
+                        listOf(
+                            EkwingAnswerQuestion(
+                                order = "Q${index + 1}",
+                                question = title,
+                                answer = "未解析到标准答案",
+                            )
                         )
-                    )
-                },
+                    },
+                )
             )
         }
     }
@@ -752,6 +851,8 @@ class EkwingAnswerReader(private val context: Context) {
         session: EkwingLoginSession,
         exam: JSONObject,
         useBasic: Boolean,
+        source: EkwingAnswerSource = EkwingAnswerSource.Current,
+        paperKey: String? = null,
     ): List<EkwingAnswerSection> {
         val selfId = examSelfId(exam) ?: throw RuntimeException("选中的考试缺少 self_id")
         val examItem = runCatching {
@@ -772,7 +873,32 @@ class EkwingAnswerReader(private val context: Context) {
         }.getOrElse { error ->
             throw RuntimeException("考试成绩读取失败：${error.message}")
         }
+
+        val classReport = extractClassScoreReport(scoreInfo)
+        if (classReport != null) {
+            val key = paperKey ?: exam.answerPaperKey()
+            EkwingAnswerState.updateSource(source) { state ->
+                state.copy(classScoreReportByPaperKey = state.classScoreReportByPaperKey + (key to classReport))
+            }
+        }
+
         val modelScoreInfos = fetchModelScoreInfos(session, selfId, scoreInfo)
+        val examTitle = firstNonBlank(exam.optString("title"), exam.optString("self_title"), "考试答案")
+            ?: "考试答案"
+        val examSummary = exam.toAnswerPaper(0).summary
+
+        val parsedModelSections = parseJsonExamSections(modelScoreInfos, examTitle, examSummary)
+            .filter { it.questions.isNotEmpty() }
+        if (parsedModelSections.isNotEmpty()) {
+            return parsedModelSections
+        }
+
+        val parsedScoreSections = parseScoreInfoExamSections(scoreInfo, examTitle, examSummary)
+            .filter { it.questions.isNotEmpty() }
+        if (parsedScoreSections.isNotEmpty()) {
+            return parsedScoreSections
+        }
+
         val questions = examAnswerQuestions(scoreInfo, modelScoreInfos).ifEmpty {
             EkwingAnswerParser.parseHomeworkAnswerQuestions(
                 JSONObject().apply {
@@ -784,10 +910,9 @@ class EkwingAnswerReader(private val context: Context) {
         }
         return listOf(
             EkwingAnswerSection(
-                title = firstNonBlank(exam.optString("title"), exam.optString("self_title"), "考试答案")
-                    ?: "考试答案",
+                title = examTitle,
                 category = "exam",
-                originalText = exam.toAnswerPaper(0).summary,
+                originalText = examSummary,
                 questions = questions.ifEmpty {
                     listOf(
                         EkwingAnswerQuestion(
@@ -1417,21 +1542,90 @@ internal fun examAnswerQuestions(scoreInfo: Any?, modelScoreInfos: Any?): List<E
 internal fun parseJsonExamAnswers(root: Any?): List<EkwingAnswerQuestion> {
     val questions = mutableListOf<EkwingAnswerQuestion>()
     extractModelScoreItems(root).forEach { item ->
-        val data = normalizeJson(item.opt("data")) as? JSONObject ?: return@forEach
-        val modelInfo = data.optJSONObject("model_info") ?: return@forEach
-        val modelBaseInfo = data.optJSONObject("model_base_info")
+        val data = (normalizeJson(item.opt("data")) as? JSONObject) ?: item
+        val modelInfo = data.optJSONObject("model_info") ?: item.optJSONObject("model_info") ?: return@forEach
+        val modelBaseInfo = data.optJSONObject("model_base_info") ?: item.optJSONObject("model_base_info")
         questions += parseJsonModelInfo(modelInfo, modelBaseInfo)
     }
     return questions.mapIndexed { index, question -> question.copy(order = "Q${index + 1}") }
 }
 
-private fun extractModelScoreItems(root: Any?): List<JSONObject> {
+internal fun parseJsonExamSections(
+    root: Any?,
+    examTitle: String = "考试答案",
+    examSummary: String = "学习中心考试",
+): List<EkwingAnswerSection> {
+    val sections = mutableListOf<EkwingAnswerSection>()
+    extractModelScoreItems(root).forEachIndexed { index, item ->
+        val data = (normalizeJson(item.opt("data")) as? JSONObject) ?: item
+        val modelInfo = data.optJSONObject("model_info") ?: item.optJSONObject("model_info") ?: return@forEachIndexed
+        val modelBaseInfo = data.optJSONObject("model_base_info") ?: item.optJSONObject("model_base_info")
+
+        val rawModelType = firstNonBlank(modelInfo.optString("model_type"), modelInfo.optString("type"))
+        val modelName = firstNonBlank(
+            knownModelTypeName(rawModelType),
+            titleFromModelBaseInfo(modelBaseInfo),
+            modelInfo.optString("model_type_name"),
+            modelInfo.optString("name"),
+            if (rawModelType == "1") "模仿朗读" else "模块 ${index + 1}",
+        ) ?: if (rawModelType == "1") "模仿朗读" else "模块 ${index + 1}"
+        val modelType = firstNonBlank(rawModelType, "exam")
+
+        val readingText = firstNonBlank(
+            modelInfo.optString("real_text"),
+            modelInfo.optString("dis_text"),
+            modelInfo.optString("reading_text"),
+            modelInfo.optString("text"),
+        )
+
+        val isReadingModel = rawModelType == "1" || !readingText.isNullOrBlank()
+
+        if (isReadingModel) {
+            val text = readingText.orEmpty()
+            sections += EkwingAnswerSection(
+                title = modelName,
+                category = rawModelType ?: "1",
+                originalText = text,
+                questions = listOf(
+                    EkwingAnswerQuestion(
+                        order = "Q1",
+                        question = "朗读文本",
+                        answer = text,
+                    )
+                ),
+            )
+        } else {
+            val questions = parseJsonModelInfo(modelInfo, modelBaseInfo).ifEmpty {
+                EkwingAnswerParser.parseExamAnswerQuestions(modelInfo).ifEmpty {
+                    EkwingAnswerParser.parseHomeworkAnswerQuestions(modelInfo)
+                }
+            }
+            sections += EkwingAnswerSection(
+                title = modelName,
+                category = rawModelType ?: "exam",
+                originalText = firstNonBlank(
+                    modelInfo.optString("answer_tip"),
+                    modelInfo.optString("desc"),
+                    modelName,
+                ) ?: modelName,
+                questions = questions,
+            )
+        }
+    }
+    return sections
+}
+
+internal fun extractModelScoreItems(root: Any?): List<JSONObject> {
     return when (val normalized = normalizeJson(root)) {
         is JSONArray -> normalized.jsonObjects()
         is JSONObject -> {
-            val wrappedItems = normalized.optJSONArray("model_score_infos")?.jsonObjects().orEmpty()
+            val list = sequenceOf("model_score_infos", "list", "rows", "data")
+                .mapNotNull { normalized.optJSONArray(it) }
+                .firstOrNull()
+                ?.jsonObjects()
+                .orEmpty()
             when {
-                wrappedItems.isNotEmpty() -> wrappedItems
+                list.isNotEmpty() -> list
                 normalized.optJSONObject("data")?.optJSONObject("model_info") != null -> listOf(normalized)
                 normalized.optJSONObject("model_info") != null -> listOf(JSONObject().apply { put("data", normalized) })
                 else -> emptyList()
@@ -1455,7 +1649,13 @@ private fun parseJsonModelInfo(
     if (quesList != null && quesList.length() > 0) {
         return (0 until quesList.length()).mapNotNull { index ->
             val question = quesList.optJSONObject(index) ?: return@mapNotNull null
-            val answers = flattenJsonExamAnswer(question.opt("answer"))
+            val answers = flattenJsonExamAnswer(
+                question.opt("answer")
+                    ?: question.opt("refText")
+                    ?: question.opt("right_answer")
+                    ?: question.opt("standard_answer")
+                    ?: question.opt("answers")
+            )
             if (answers.isEmpty()) return@mapNotNull null
             EkwingAnswerQuestion(
                 order = "Q${index + 1}",
@@ -1568,6 +1768,292 @@ private fun collectExamQuestions(value: Any?, questions: MutableList<EkwingAnswe
         }
     }
 }
+
+internal fun parseScoreInfoExamSections(
+    scoreInfo: Any?,
+    examTitle: String = "考试答案",
+    examSummary: String = "学习中心考试",
+): List<EkwingAnswerSection> {
+    val root = normalizeJson(scoreInfo)
+    val candidates = mutableListOf<JSONObject>()
+    fun collectCandidates(value: Any?, depth: Int = 0) {
+        if (depth > 6) return
+        when (val normalized = normalizeJson(value)) {
+            is JSONArray -> {
+                for (i in 0 until normalized.length()) {
+                    collectCandidates(normalized.opt(i), depth + 1)
+                }
+            }
+            is JSONObject -> {
+                candidates += normalized
+                normalized.optJSONArray("useful_candidates")?.let { arr ->
+                    for (i in 0 until arr.length()) collectCandidates(arr.opt(i), depth + 1)
+                }
+                normalized.opt("data")?.let { collectCandidates(it, depth + 1) }
+            }
+        }
+    }
+    collectCandidates(root)
+
+    for (candidate in candidates) {
+        val ansInfo = candidate.optJSONObject("ans_info") ?: continue
+        val content = ansInfo.optJSONArray("content") ?: continue
+        if (content.length() == 0) continue
+
+        val modelTitleMap = mutableMapOf<String, ModelTitleMeta>()
+        candidate.optJSONArray("self")?.jsonObjects()?.forEach { item ->
+            val modelId = item.optString("model_id").takeIf { it.isNotBlank() } ?: return@forEach
+            modelTitleMap[modelId] = ModelTitleMeta(
+                title = item.optString("title"),
+                modelType = item.optString("model_type"),
+                desc = item.optString("desc"),
+            )
+        }
+        candidate.optJSONArray("model_list")?.jsonObjects()?.forEach { item ->
+            val modelId = item.optString("model_id").takeIf { it.isNotBlank() } ?: return@forEach
+            val existing = modelTitleMap[modelId]
+            modelTitleMap[modelId] = ModelTitleMeta(
+                title = firstNonBlank(existing?.title, item.optString("title")),
+                modelType = firstNonBlank(existing?.modelType, item.optString("model_type")),
+                desc = firstNonBlank(existing?.desc, item.optString("desc")),
+            )
+        }
+
+        val sections = mutableListOf<EkwingAnswerSection>()
+        for (sectionIndex in 0 until content.length()) {
+            val sectionObj = content.optJSONObject(sectionIndex) ?: continue
+            val modelId = sectionObj.optString("model_id")
+            val meta = modelTitleMap[modelId]
+            val sectionTitle = firstNonBlank(
+                sectionObj.optString("title"),
+                sectionObj.optString("name"),
+                meta?.title,
+                knownModelTypeName(meta?.modelType ?: sectionObj.optString("model_type")),
+                "部分 ${sectionIndex + 1}",
+            ) ?: "部分 ${sectionIndex + 1}"
+            val sectionCategory = firstNonBlank(
+                sectionObj.optString("model_type"),
+                meta?.modelType,
+                "exam",
+            ) ?: "exam"
+            val origText = firstNonBlank(
+                sectionObj.optString("desc"),
+                meta?.desc,
+                sectionObj.optString("tip"),
+                sectionTitle,
+            ) ?: sectionTitle
+
+            val quesList = sectionObj.optJSONArray("ques_list")
+            val questions = mutableListOf<EkwingAnswerQuestion>()
+            if (quesList != null) {
+                for (qIndex in 0 until quesList.length()) {
+                    val q = quesList.optJSONObject(qIndex) ?: continue
+                    val answer = firstNonBlank(
+                        flattenAnswer(q.opt("refText")).joinToString("\n"),
+                        flattenAnswer(firstAnswerValue(q)).joinToString("\n"),
+                        firstNonBlank(q.optString("real_text"), q.optString("dis_text")),
+                    )
+                    if (!answer.isNullOrBlank()) {
+                        questions += EkwingAnswerQuestion(
+                            order = "Q${questions.size + 1}",
+                            question = firstQuestionText(q) ?: "题目 ${questions.size + 1}",
+                            answer = answer,
+                        )
+                    }
+                }
+            }
+            if (questions.isNotEmpty()) {
+                sections += EkwingAnswerSection(
+                    title = sectionTitle,
+                    category = sectionCategory,
+                    originalText = origText,
+                    questions = questions,
+                )
+            }
+        }
+        if (sections.isNotEmpty()) {
+            return sections
+        }
+    }
+
+    for (candidate in candidates) {
+        val modelList = candidate.optJSONArray("model_list") ?: continue
+        if (modelList.length() == 0) continue
+        val sections = mutableListOf<EkwingAnswerSection>()
+        for (i in 0 until modelList.length()) {
+            val item = modelList.optJSONObject(i) ?: continue
+            val questions = mutableListOf<EkwingAnswerQuestion>()
+            val quesList = item.optJSONArray("ques_list")
+            if (quesList != null) {
+                for (qIndex in 0 until quesList.length()) {
+                    val q = quesList.optJSONObject(qIndex) ?: continue
+                    val answer = firstNonBlank(
+                        flattenAnswer(q.opt("refText")).joinToString("\n"),
+                        flattenAnswer(firstAnswerValue(q)).joinToString("\n"),
+                        firstNonBlank(q.optString("real_text"), q.optString("dis_text")),
+                    )
+                    if (!answer.isNullOrBlank()) {
+                        questions += EkwingAnswerQuestion(
+                            order = "Q${questions.size + 1}",
+                            question = firstQuestionText(q) ?: "题目 ${questions.size + 1}",
+                            answer = answer,
+                        )
+                    }
+                }
+            }
+            if (questions.isNotEmpty()) {
+                val title = firstNonBlank(item.optString("title"), item.optString("name"), "模块 ${i + 1}") ?: "模块 ${i + 1}"
+                sections += EkwingAnswerSection(
+                    title = title,
+                    category = item.optString("model_type").ifBlank { "exam" },
+                    originalText = firstNonBlank(item.optString("desc"), title) ?: title,
+                    questions = questions,
+                )
+            }
+        }
+        if (sections.isNotEmpty()) {
+            return sections
+        }
+    }
+
+    return emptyList()
+}
+
+internal fun extractClassScoreReport(scoreInfo: Any?): EkwingClassScoreReport? {
+    val root = normalizeJson(scoreInfo) ?: return null
+    val candidates = mutableListOf<JSONObject>()
+    fun collect(value: Any?, depth: Int) {
+        if (depth > 6) return
+        when (val normalized = normalizeJson(value)) {
+            is JSONArray -> {
+                for (i in 0 until normalized.length()) {
+                    collect(normalized.opt(i), depth + 1)
+                }
+            }
+            is JSONObject -> {
+                candidates += normalized
+                normalized.optJSONArray("useful_candidates")?.let { arr ->
+                    for (i in 0 until arr.length()) collect(arr.opt(i), depth + 1)
+                }
+                normalized.opt("data")?.let { collect(it, depth + 1) }
+            }
+        }
+    }
+    collect(root, 0)
+
+    for (candidate in candidates) {
+        val selfRanksJson = candidate.optJSONArray("self_ranks")
+        val hasUserRank = candidate.has("user_rank")
+        if (selfRanksJson == null && !hasUserRank) continue
+
+        val rankItems = mutableListOf<EkwingClassRankItem>()
+        if (selfRanksJson != null) {
+            for (i in 0 until selfRanksJson.length()) {
+                val item = selfRanksJson.optJSONObject(i) ?: continue
+                val userInfo = item.optJSONObject("user_info")
+                val isSelf = when (val v = item.opt("is_self")) {
+                    is Boolean -> v
+                    is Number -> v.toInt() == 1
+                    is String -> v == "1" || v.equals("true", ignoreCase = true)
+                    null -> false
+                    else -> false
+                }
+                val index = item.optInt("index", -1).takeIf { it >= 0 }
+                    ?: item.optInt("rank", -1).takeIf { it >= 0 }
+                    ?: (i + 1)
+                val name = firstNonBlank(
+                    item.optString("real_name"),
+                    userInfo?.optString("nicename"),
+                    userInfo?.optString("real_name"),
+                    userInfo?.optString("name"),
+                    item.optString("nicename"),
+                    item.optString("name"),
+                ) ?: ""
+                val score = firstNonBlank(item.optString("score"), item.optString("user_score")) ?: ""
+                val className = firstNonBlank(
+                    userInfo?.optString("classes"),
+                    userInfo?.optString("class_name"),
+                    userInfo?.optString("className"),
+                    item.optString("classes"),
+                    item.optString("class_name"),
+                    item.optString("className"),
+                ) ?: ""
+                val studentNo = firstNonBlank(
+                    userInfo?.optString("student_no"),
+                    userInfo?.optString("studentNo"),
+                    item.optString("student_no"),
+                    item.optString("studentNo"),
+                ) ?: ""
+
+                rankItems += EkwingClassRankItem(
+                    index = index,
+                    name = name,
+                    score = score,
+                    isSelf = isSelf,
+                    className = className,
+                    studentNo = studentNo,
+                )
+            }
+        }
+
+        val selfItem = rankItems.firstOrNull { it.isSelf }
+
+        val userRankRaw = candidate.opt("user_rank")
+        val userRankObj = userRankRaw as? JSONObject
+        val userRank = when {
+            userRankObj != null -> {
+                userRankObj.optInt("rank", -1).takeIf { it > 0 }
+                    ?: userRankObj.optInt("user_rank", -1).takeIf { it > 0 }
+                    ?: userRankObj.optInt("index", -1).takeIf { it > 0 }
+            }
+            userRankRaw is Number -> userRankRaw.toInt()
+            userRankRaw is String -> userRankRaw.toIntOrNull()
+            else -> null
+        } ?: selfItem?.index ?: candidate.optInt("rank", -1).takeIf { it > 0 }
+
+        val userScore = firstNonBlank(
+            userRankObj?.optString("score"),
+            userRankObj?.optString("user_score"),
+            candidate.optString("user_score"),
+            candidate.optString("score"),
+            selfItem?.score,
+        )
+
+        val className = firstNonBlank(
+            userRankObj?.optString("classes"),
+            userRankObj?.optString("className"),
+            userRankObj?.optJSONObject("user_info")?.optString("classes"),
+            candidate.optString("classes"),
+            candidate.optString("className"),
+            candidate.optString("class_name"),
+            candidate.optJSONObject("user_info")?.optString("classes"),
+            selfItem?.className,
+        )
+
+        if (userRank != null || userScore != null || className != null || rankItems.isNotEmpty()) {
+            return EkwingClassScoreReport(
+                userRank = userRank,
+                userScore = userScore,
+                className = className,
+                ranks = rankItems,
+            )
+        }
+    }
+    return null
+}
+
+private fun isExamPayload(obj: JSONObject): Boolean {
+    return obj.optString("type") == "exam" ||
+        obj.optString("task_type") == "exam" ||
+        obj.optString("self_id").isNotBlank() ||
+        obj.optString("last_model_id").isNotBlank()
+}
+
+private data class ModelTitleMeta(
+    val title: String? = null,
+    val modelType: String? = null,
+    val desc: String? = null,
+)
 
 private fun parseExamReportQuestions(report: JSONObject): List<EkwingAnswerQuestion> {
     val ansInfo = report.optJSONObject("ans_info") ?: return emptyList()

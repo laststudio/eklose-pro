@@ -17,6 +17,7 @@ private const val BASE_URL = "https://mapi.ekwing.com"
 private const val LOGIN_SCHOOL_PATH = "/student/User/loginschool"
 private const val LOGIN_ACCOUNT_PATH = "/student/User/login"
 private const val SEARCH_SCHOOL_PATH = "/student/user/searchschool"
+const val COUNTY_SCHOOL_PATH = "/student/user/scgetschool"
 
 data class EkwingSchool(
     val schoolId: String,
@@ -65,6 +66,17 @@ class EkwingAuthClient(context: Context) {
         payload["key"] = keyword
         payload["page"] = page.toString()
         val body = postForm(SEARCH_SCHOOL_PATH, payload)
+        if (body.optInt("status", -1) != 0) {
+            throw RuntimeException(errorMessage(body))
+        }
+        return extractList(body.opt("data")).mapNotNull(::normalizeSchool)
+    }
+
+    fun getSchoolsByCounty(countyId: String, studySection: String = "0"): List<EkwingSchool> {
+        val payload = commonParams().toMutableMap()
+        payload["id"] = countyId
+        payload["st_id"] = studySection
+        val body = postForm(COUNTY_SCHOOL_PATH, payload)
         if (body.optInt("status", -1) != 0) {
             throw RuntimeException(errorMessage(body))
         }
@@ -194,23 +206,6 @@ class EkwingAuthClient(context: Context) {
             }
             else -> emptyList()
         }
-    }
-
-    private fun normalizeSchool(item: JSONObject): EkwingSchool? {
-        val schoolId = firstNonEmpty(item.opt("school_id"), item.opt("id")) ?: return null
-        val schoolName = firstNonEmpty(item.opt("school_name"), item.opt("name"))?.trim() ?: return null
-        val zone = listOf(
-            item.optString("province_name"),
-            item.optString("city_name"),
-            item.optString("county_name"),
-        ).filter { it.isNotBlank() }.joinToString("-").ifBlank {
-            item.optString("zone")
-        }
-        return EkwingSchool(
-            schoolId = schoolId,
-            schoolName = schoolName,
-            zone = zone,
-        )
     }
 
     private fun extractOvernameAccounts(items: JSONArray?): List<EkwingOvernameAccount> {
@@ -444,3 +439,21 @@ private fun firstNonEmpty(vararg values: Any?): String? {
         value?.takeUnless { it == JSONObject.NULL }?.toString()?.takeIf { it.isNotBlank() }
     }
 }
+
+internal fun normalizeSchool(item: JSONObject): EkwingSchool? {
+    val schoolId = firstNonEmpty(item.opt("school_id"), item.opt("id")) ?: return null
+    val schoolName = firstNonEmpty(item.opt("school_name"), item.opt("name"))?.trim() ?: return null
+    val zone = listOf(
+        item.optString("province_name"),
+        item.optString("city_name"),
+        item.optString("county_name"),
+    ).filter { it.isNotBlank() }.joinToString("-").ifBlank {
+        item.optString("zone")
+    }
+    return EkwingSchool(
+        schoolId = schoolId,
+        schoolName = schoolName,
+        zone = zone,
+    )
+}
+

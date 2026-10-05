@@ -102,6 +102,8 @@ private fun LoginScreen(
     var schoolKeyword by rememberSaveable { mutableStateOf("") }
     var schoolName by rememberSaveable { mutableStateOf("") }
     var schoolId by rememberSaveable { mutableStateOf("") }
+    var searchByCounty by rememberSaveable { mutableStateOf(false) }
+    var countyId by rememberSaveable { mutableStateOf("") }
     var isBusy by rememberSaveable { mutableStateOf(false) }
     var statusText by rememberSaveable { mutableStateOf("请输入登录信息") }
     var schools by remember { mutableStateOf<List<EkwingSchool>>(emptyList()) }
@@ -174,54 +176,115 @@ private fun LoginScreen(
                             if (mode == LoginMode.Account) {
                                 LoginField(username, { username = it }, "账号")
                             } else {
-                                LoginField(
-                                    value = schoolKeyword,
-                                    onValueChange = {
-                                        schoolKeyword = it
-                                        schoolName = ""
-                                        schoolId = ""
+                                OverlayDropdownPreference(
+                                    title = "检索方式",
+                                    summary = if (searchByCounty) "按区县代码检索学校" else "按学校名称关键字检索",
+                                    items = listOf("关键字检索", "区县代码检索"),
+                                    selectedIndex = if (searchByCounty) 1 else 0,
+                                    onSelectedIndexChange = { index ->
+                                        searchByCounty = index == 1
                                         showSchoolResults = false
                                     },
-                                    label = "学校关键字",
-                                    trailing = {
-                                        IconButton(
-                                            onClick = {
-                                                if (schoolKeyword.isBlank()) {
-                                                    statusText = "请先输入学校关键字"
-                                                    return@IconButton
-                                                }
-                                                isBusy = true
-                                                statusText = "正在搜索学校..."
-                                                coroutineScope.launch {
-                                                    runCatching {
-                                                        withContext(Dispatchers.IO) {
-                                                            client.searchSchools(schoolKeyword.trim())
-                                                        }
-                                                    }.onSuccess { result ->
-                                                        if (result.isNotEmpty()) {
-                                                            schools = result
-                                                        }
-                                                        showSchoolResults = result.isNotEmpty()
-                                                        statusText = if (result.isEmpty()) {
-                                                            "未搜索到学校"
-                                                        } else {
-                                                            "请选择学校"
-                                                        }
-                                                    }.onFailure { error ->
-                                                        statusText = "搜索学校失败：${error.message}"
-                                                    }
-                                                    isBusy = false
-                                                }
-                                            },
-                                        ) {
-                                            Icon(
-                                                imageVector = MiuixIcons.Basic.Search,
-                                                contentDescription = "搜索学校",
-                                                tint = MiuixTheme.colorScheme.primary,
-                                            )
-                                        }
-                                    },
                                 )
+                                if (searchByCounty) {
+                                    LoginField(
+                                        value = countyId,
+                                        onValueChange = {
+                                            countyId = it
+                                            schoolName = ""
+                                            schoolId = ""
+                                            showSchoolResults = false
+                                        },
+                                        label = "区县代码 (County ID)",
+                                        trailing = {
+                                            IconButton(
+                                                onClick = {
+                                                    if (countyId.isBlank()) {
+                                                        statusText = "请先输入区县代码"
+                                                        return@IconButton
+                                                    }
+                                                    isBusy = true
+                                                    statusText = "正在获取学校..."
+                                                    coroutineScope.launch {
+                                                        runCatching {
+                                                            withContext(Dispatchers.IO) {
+                                                                client.getSchoolsByCounty(countyId.trim())
+                                                            }
+                                                        }.onSuccess { result ->
+                                                            if (result.isNotEmpty()) {
+                                                                schools = result
+                                                            }
+                                                            showSchoolResults = result.isNotEmpty()
+                                                            statusText = if (result.isEmpty()) {
+                                                                "未获取到学校"
+                                                            } else {
+                                                                "请选择学校"
+                                                            }
+                                                        }.onFailure { error ->
+                                                            statusText = "获取学校失败：${error.message}"
+                                                        }
+                                                        isBusy = false
+                                                    }
+                                                },
+                                            ) {
+                                                Icon(
+                                                    imageVector = MiuixIcons.Basic.Search,
+                                                    contentDescription = "按区县代码获取学校",
+                                                    tint = MiuixTheme.colorScheme.primary,
+                                                )
+                                            }
+                                        },
+                                    )
+                                } else {
+                                    LoginField(
+                                        value = schoolKeyword,
+                                        onValueChange = {
+                                            schoolKeyword = it
+                                            schoolName = ""
+                                            schoolId = ""
+                                            showSchoolResults = false
+                                        },
+                                        label = "学校关键字",
+                                        trailing = {
+                                            IconButton(
+                                                onClick = {
+                                                    if (schoolKeyword.isBlank()) {
+                                                        statusText = "请先输入学校关键字"
+                                                        return@IconButton
+                                                    }
+                                                    isBusy = true
+                                                    statusText = "正在搜索学校..."
+                                                    coroutineScope.launch {
+                                                        runCatching {
+                                                            withContext(Dispatchers.IO) {
+                                                                client.searchSchools(schoolKeyword.trim())
+                                                            }
+                                                        }.onSuccess { result ->
+                                                            if (result.isNotEmpty()) {
+                                                                schools = result
+                                                            }
+                                                            showSchoolResults = result.isNotEmpty()
+                                                            statusText = if (result.isEmpty()) {
+                                                                "未搜索到学校"
+                                                            } else {
+                                                                "请选择学校"
+                                                            }
+                                                        }.onFailure { error ->
+                                                            statusText = "搜索学校失败：${error.message}"
+                                                        }
+                                                        isBusy = false
+                                                    }
+                                                },
+                                            ) {
+                                                Icon(
+                                                    imageVector = MiuixIcons.Basic.Search,
+                                                    contentDescription = "搜索学校",
+                                                    tint = MiuixTheme.colorScheme.primary,
+                                                )
+                                            }
+                                        },
+                                    )
+                                }
                                 LoginField(name, { name = it }, "学生姓名")
                             }
                             LoginField(password, { password = it }, "密码", password = true)
