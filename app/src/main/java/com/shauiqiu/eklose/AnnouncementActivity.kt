@@ -24,8 +24,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -35,24 +35,20 @@ import androidx.compose.ui.unit.dp
 import com.shauiqiu.eklose.ui.theme.EkloseTheme
 import com.shauiqiu.eklose.ui.theme.LocalEkloseCardSurface
 import com.shauiqiu.eklose.ui.theme.LocalEklosePageBackground
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
-import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.DropdownEntry
-import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.TextButton
-import top.yukonga.miuix.kmp.menu.OverlayIconDropdownMenu
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.PullToRefresh
+import top.yukonga.miuix.kmp.basic.rememberPullToRefreshState
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.extended.MoreCircle
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import java.net.URL
 import java.net.URLConnection
@@ -118,7 +114,9 @@ private fun AnnouncementScreen(
     val context = LocalContext.current
     val scrollBehavior = MiuixScrollBehavior()
     val blurBackdrop = rememberEkloseBlurBackdrop()
-    val scope = rememberCoroutineScope()
+    val pullToRefreshState = rememberPullToRefreshState()
+    var isRefreshing by remember { mutableStateOf(false) }
+    var refreshRequest by remember { mutableIntStateOf(0) }
     val snackbarHostState = remember { SnackbarHostState() }
     val currentVersionName = remember(context) { context.currentVersionName() }
     var remoteStatus by remember { mutableStateOf(EkloseRemoteConfigManager.cachedStatus) }
@@ -139,59 +137,61 @@ private fun AnnouncementScreen(
             },
         )
     }
-    val updateEntry = DropdownEntry(
-        items = listOf(
-            DropdownItem(
-                text = "检测更新",
-                onClick = {
-                    scope.launch {
-                        runCatching { EkloseRemoteConfigManager.checkStatus(context) }
-                            .onSuccess { status ->
-                                if (status.showUpdateDialog) {
-                                    updateDialogStatus = status
-                                } else {
-                                    snackbarHostState.showSnackbar("当前已是最新版本")
-                                }
-                            }
-                            .onFailure {
-                                snackbarHostState.showSnackbar("检测更新失败")
-                            }
-                    }
-                },
-            ),
-        ),
-    )
-
-    LaunchedEffect(Unit) {
-        if (remoteStatus == null) {
-            runCatching {
-                EkloseRemoteConfigManager.checkStatus(context)
-            }.onSuccess {
-                remoteStatus = it
-                content = content.withStatus(it)
+    // One effect owns initial loading and pull-to-refresh, including same-URL content reloads.
+    LaunchedEffect(refreshRequest) {
+        val userRefresh = refreshRequest > 0
+        isRefreshing = true
+        var updateCheckFailed = false
+        var checkedStatus: EkloseRemoteStatus? = null
+        try {
+            if (userRefresh || remoteStatus == null) {
+                try {
+                    val status = EkloseRemoteConfigManager.checkStatus(context)
+                    checkedStatus = status
+                    remoteStatus = status
+                    content = content.withStatus(status)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    updateCheckFailed = true
+                }
+            }
+            fetchStatus = "正在同步远程内容..."
+            val announcementResult = fetchRemoteTextOrNull(content.announcementUrl)
+            val changelogResult = fetchRemoteTextOrNull(content.changelogUrl)
+            var successCount = 0
+            if (!announcementResult.isNullOrBlank()) {
+                announcementBody = parseRemoteContent(announcementResult)
+                successCount++
+            } else if (content.announcementUrl.isBlank()) {
                 announcementBody = content.announcementMessage.ifBlank { "暂无公告" }
+            }
+            if (!changelogResult.isNullOrBlank()) {
+                changelogBody = parseCurrentVersionChangelog(changelogResult, currentVersionName)
+                    .ifBlank { parseRemoteContent(changelogResult) }
+                successCount++
+            } else if (content.changelogUrl.isBlank()) {
                 changelogBody = content.changelogSummary.ifBlank { "暂无更新内容" }
             }
+            fetchStatus = when {
+                content.announcementUrl.isBlank() && content.changelogUrl.isBlank() ->
+                    "暂无远程内容地址，显示缓存内容"
+                successCount > 0 -> "获取成功，已显示当前版本 $currentVersionName 的更新日志"
+                else -> "同步失败，已显示缓存内容"
+            }
+            if (userRefresh && checkedStatus?.showUpdateDialog == true) {
+                updateDialogStatus = checkedStatus
+            }
+        } finally {
+            // Snackbar waits for dismissal; release the refresh indicator before showing it.
+            isRefreshing = false
         }
-    }
-
-    LaunchedEffect(content.announcementUrl, content.changelogUrl) {
-        val announcementResult = fetchRemoteTextOrNull(content.announcementUrl)
-        val changelogResult = fetchRemoteTextOrNull(content.changelogUrl)
-        var successCount = 0
-        if (!announcementResult.isNullOrBlank()) {
-            announcementBody = parseRemoteContent(announcementResult)
-            successCount++
-        }
-        if (!changelogResult.isNullOrBlank()) {
-            changelogBody = parseCurrentVersionChangelog(changelogResult, currentVersionName)
-                .ifBlank { parseRemoteContent(changelogResult) }
-            successCount++
-        }
-        fetchStatus = when {
-            content.announcementUrl.isBlank() && content.changelogUrl.isBlank() -> "暂无远程内容地址，显示缓存内容"
-            successCount > 0 -> "获取成功，已显示当前版本 $currentVersionName 的更新日志"
-            else -> "同步失败，已显示缓存内容"
+        if (userRefresh) {
+            when {
+                updateCheckFailed -> snackbarHostState.showSnackbar("检测更新失败，已保留缓存内容")
+                checkedStatus?.showUpdateDialog == false ->
+                    snackbarHostState.showSnackbar("当前已是最新版本")
+            }
         }
     }
 
@@ -211,15 +211,6 @@ private fun AnnouncementScreen(
                 barColor = if (blurBackdrop != null) Color.Transparent else LocalEklosePageBackground.current,
                 onBack = onBack,
                 scrollBehavior = scrollBehavior,
-                actions = {
-                    OverlayIconDropdownMenu(entry = updateEntry) {
-                        Icon(
-                            imageVector = MiuixIcons.MoreCircle,
-                            contentDescription = "更多操作",
-                            tint = MiuixTheme.colorScheme.onSurface,
-                        )
-                    }
-                },
             )
             }
         },
@@ -234,49 +225,62 @@ private fun AnnouncementScreen(
             color = LocalEklosePageBackground.current,
             contentColor = MiuixTheme.colorScheme.onSurface,
         ) {
-            EkloseResponsiveList(
+            PullToRefresh(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 14.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                item {
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        color = Color.Transparent,
-                        contentColor = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    ) {
-                        Text(
-                            text = fetchStatus,
-                            modifier = Modifier.padding(horizontal = 28.dp),
-                            style = MiuixTheme.textStyles.body2,
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        )
+                isRefreshing = isRefreshing,
+                onRefresh = {
+                    if (!isRefreshing) {
+                        isRefreshing = true
+                        refreshRequest++
                     }
-                }
-                item {
-                    GroupSection(title = "公告") {
-                        GroupItem(
-                            title = content.announcementTitle.ifBlank { "公告" },
-                            summary = announcementBody,
-                            showArrow = false,
-                        )
-                        if (content.announcementUpdatedAt.isNotBlank()) {
-                            GroupDivider()
-                            GroupItem(
-                                title = "更新时间",
-                                summary = content.announcementUpdatedAt,
-                                showArrow = false,
+                },
+                pullToRefreshState = pullToRefreshState,
+                refreshTexts = listOf("下拉刷新", "松开刷新", "正在刷新", "刷新完成"),
+            ) {
+                EkloseResponsiveList(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(horizontal = 18.dp, vertical = 14.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    item {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = Color.Transparent,
+                            contentColor = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        ) {
+                            Text(
+                                text = fetchStatus,
+                                modifier = Modifier.padding(horizontal = 28.dp),
+                                style = MiuixTheme.textStyles.body2,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                             )
                         }
                     }
-                }
-                item {
-                    GroupSection(title = "更新日志") {
-                        GroupItem(
-                            title = content.changelogTitle.ifBlank { "更新日志" },
-                            summary = changelogBody,
-                            showArrow = false,
-                        )
+                    item {
+                        GroupSection(title = "公告") {
+                            GroupItem(
+                                title = content.announcementTitle.ifBlank { "公告" },
+                                summary = announcementBody,
+                                showArrow = false,
+                            )
+                            if (content.announcementUpdatedAt.isNotBlank()) {
+                                GroupDivider()
+                                GroupItem(
+                                    title = "更新时间",
+                                    summary = content.announcementUpdatedAt,
+                                    showArrow = false,
+                                )
+                            }
+                        }
+                    }
+                    item {
+                        GroupSection(title = "更新日志") {
+                            GroupItem(
+                                title = content.changelogTitle.ifBlank { "更新日志" },
+                                summary = changelogBody,
+                                showArrow = false,
+                            )
+                        }
                     }
                 }
             }
