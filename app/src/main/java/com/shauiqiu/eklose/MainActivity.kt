@@ -97,8 +97,9 @@ import top.yukonga.miuix.kmp.basic.BadgedBox
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
-import top.yukonga.miuix.kmp.basic.FloatingToolbar
 import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.DropdownEntry
+import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
 import top.yukonga.miuix.kmp.basic.NavigationBar
@@ -118,8 +119,9 @@ import top.yukonga.miuix.kmp.basic.rememberPullToRefreshState
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.basic.Check
 import top.yukonga.miuix.kmp.icon.basic.Search
-import top.yukonga.miuix.kmp.icon.extended.Delete
 import top.yukonga.miuix.kmp.icon.extended.Settings
+import top.yukonga.miuix.kmp.icon.extended.MoreCircle
+import top.yukonga.miuix.kmp.menu.OverlayIconDropdownMenu
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
@@ -351,6 +353,39 @@ private fun EkloseApp(openHomeRequest: Long = 0L) {
             )
         }
 
+        fun readSelectedHomework() {
+            val requestedScope = selectedHomeworkScope
+            val requestedSource = requestedScope.answerSource
+            if (requestedSource in readingSources) return
+            readingSources += requestedSource
+            readerSummary = "正在读取${requestedScope.label}..."
+            scope.launch {
+                val message = try {
+                    val result = withContext(Dispatchers.IO) {
+                        EkwingAnswerReader(context).readPapers(source = requestedSource)
+                    }
+                    "已加载 ${result.size} 份${requestedScope.label}，正在后台解析答案"
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    "读取失败：${error.message ?: "未知错误"}"
+                } finally {
+                    readingSources -= requestedSource
+                }
+                if (HomeworkScope.entries[selectedHomeworkScopeIndex].answerSource == requestedSource) {
+                    readerSummary = message
+                    snackbarHostState.showSnackbar(message)
+                }
+            }
+        }
+
+        fun deleteReadResults() {
+            EkwingAnswerPrefetchManager.cancelAll()
+            EkwingAnswerCacheStore.clear(context)
+            readerSummary = "已清空读取结果"
+            scope.launch { snackbarHostState.showSnackbar("已清空读取结果") }
+        }
+
         Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = LocalEklosePageBackground.current,
@@ -367,6 +402,25 @@ private fun EkloseApp(openHomeRequest: Long = 0L) {
                     },
                     scrollBehavior = scrollBehavior,
                     barColor = if (blurBackdrop != null) Color.Transparent else LocalEklosePageBackground.current,
+                    actions = if (selectedPage == RootPage.Reader) {
+                        {
+                            val readerActions = DropdownEntry(
+                                items = listOf(
+                                    DropdownItem(text = "读取", onClick = ::readSelectedHomework),
+                                    DropdownItem(text = "删除", onClick = ::deleteReadResults),
+                                ),
+                            )
+                            OverlayIconDropdownMenu(entry = readerActions) {
+                                Icon(
+                                    imageVector = MiuixIcons.MoreCircle,
+                                    contentDescription = "读取操作",
+                                    tint = MiuixTheme.colorScheme.onSurface,
+                                )
+                            }
+                        }
+                    } else {
+                        {}
+                    },
                 )
             }
         },
@@ -526,38 +580,8 @@ private fun EkloseApp(openHomeRequest: Long = 0L) {
                         sourceState = selectedSourceState,
                         isReading = selectedHomeworkScope.answerSource in readingSources,
                         isWideLayout = useNavigationRail,
-                        onRead = {
-                            val requestedScope = selectedHomeworkScope
-                            val requestedSource = requestedScope.answerSource
-                            if (requestedSource in readingSources) return@ReaderPage
-                            readingSources += requestedSource
-                            readerSummary = "正在读取${requestedScope.label}..."
-                            scope.launch {
-                                val message = try {
-                                    val result = withContext(Dispatchers.IO) {
-                                        EkwingAnswerReader(context).readPapers(source = requestedSource)
-                                    }
-                                    "已加载 ${result.size} 份${requestedScope.label}，正在后台解析答案"
-                                } catch (cancelled: CancellationException) {
-                                    throw cancelled
-                                } catch (error: Exception) {
-                                    "读取失败：${error.message ?: "未知错误"}"
-                                } finally {
-                                    // Snackbar suspends until dismissed; it must not prolong refresh/badge state.
-                                    readingSources -= requestedSource
-                                }
-                                if (HomeworkScope.entries[selectedHomeworkScopeIndex].answerSource == requestedSource) {
-                                    readerSummary = message
-                                    snackbarHostState.showSnackbar(message)
-                                }
-                            }
-                        },
-                        onDelete = {
-                            EkwingAnswerPrefetchManager.cancelAll()
-                            EkwingAnswerCacheStore.clear(context)
-                            readerSummary = "已清空读取结果"
-                            scope.launch { snackbarHostState.showSnackbar("已清空读取结果") }
-                        },
+                        onRead = ::readSelectedHomework,
+                        onDelete = ::deleteReadResults,
                     )
                     RootPage.Settings -> SettingsScreenRoute(
                         onBack = {},
@@ -751,33 +775,6 @@ private fun EkloseRemoteStatus.toUpdateDialog(): RemoteDialogState = toStartupDi
         locked = isForce,
         primaryActionText = "立即更新",
     )
-
-@Composable
-private fun ReaderFloatingToolbar(
-    onRead: () -> Unit,
-    onDelete: () -> Unit,
-) {
-    FloatingToolbar {
-        Row(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = onRead) {
-                Icon(
-                    imageVector = MiuixIcons.Basic.Search,
-                    contentDescription = "读取",
-                )
-            }
-            IconButton(onClick = onDelete) {
-                Icon(
-                    imageVector = MiuixIcons.Delete,
-                    contentDescription = "删除",
-                )
-            }
-        }
-    }
-}
 
 @Composable
 private fun HomePage(
@@ -1313,18 +1310,6 @@ private fun ReaderPage(
                 }
                 }
             }
-        }
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .align(Alignment.BottomEnd)
-                .padding(end = 16.dp, bottom = 24.dp),
-            contentAlignment = Alignment.CenterEnd,
-        ) {
-            ReaderFloatingToolbar(
-                onRead = onRead,
-                onDelete = onDelete,
-            )
         }
     }
 }
