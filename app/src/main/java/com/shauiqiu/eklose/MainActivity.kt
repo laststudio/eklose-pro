@@ -70,7 +70,6 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -81,6 +80,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.painterResource
 import com.shauiqiu.eklose.ui.theme.EkloseTheme
 import com.shauiqiu.eklose.ui.theme.LocalEkloseCardSurface
+import com.shauiqiu.eklose.ui.theme.LocalEkloseIsDarkTheme
 import com.shauiqiu.eklose.ui.theme.LocalEklosePageBackground
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -865,12 +865,25 @@ private fun EkloseActivationStatusCard(
     onActivate: () -> Unit,
 ) {
     if (session != null) {
-        // KernelSU's active StatusCard uses a fixed green state surface rather than the
-        // current theme's blue primary container.
-        val isDarkSurface = LocalEklosePageBackground.current.luminance() <= 0.5f
-        val cardColor = if (isDarkSurface) Color(0xFF1A3825) else Color(0xFFDFFAE4)
-        val contentColor = if (isDarkSurface) Color(0xFFB8E8C5) else Color(0xFF164A29)
-        val iconTint = if (isDarkSurface) Color(0xFFB8E8C5) else Color(0xFF36D167)
+        // KernelSU's StatusCard verbatim: theme container colors under dynamic color,
+        // fixed brand-green surface in every other color mode.
+        val isDarkTheme = LocalEkloseIsDarkTheme.current
+        val isDynamicColor = MiuixTheme.isDynamicColor
+        val cardColor = when {
+            isDynamicColor -> MiuixTheme.colorScheme.secondaryContainer
+            isDarkTheme -> Color(0xFF1A3825)
+            else -> Color(0xFFDFFAE4)
+        }
+        val contentColor = when {
+            isDynamicColor -> MiuixTheme.colorScheme.onSecondaryContainer
+            isDarkTheme -> Color(0xFFB8E8C5)
+            else -> Color(0xFF164A29)
+        }
+        val iconTint = if (isDynamicColor) {
+            MiuixTheme.colorScheme.primary.copy(alpha = 0.8f)
+        } else {
+            Color(0xFF36D167)
+        }
 
         Row(
             modifier = Modifier
