@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Publish Eklose release config through the LA Studio API and legacy mirrors."""
+"""Publish Eklose release config through the LastStudio API and legacy mirrors."""
 
 from __future__ import annotations
 
@@ -270,7 +270,7 @@ def sync_files(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Publish Eklose config through the LA Studio API and legacy mirrors")
+    parser = argparse.ArgumentParser(description="Publish Eklose config through the LastStudio API and legacy mirrors")
     parser.add_argument("--version-code", required=True, type=int, help="Android versionCode")
     parser.add_argument("--version-name", required=True, help="Android versionName")
     parser.add_argument("--apk-url", default=DEFAULT_DOWNLOAD_URL, help="Default APK download URL")
@@ -279,7 +279,7 @@ def main() -> int:
     parser.add_argument("--source-changelog-file", default=os.getenv("SOURCE_CHANGELOG_FILE", DEFAULT_CHANGELOG_FILE))
     parser.add_argument("--config-file", default=os.getenv("REMOTE_CONFIG_FILE", DEFAULT_CONFIG_FILE))
     parser.add_argument("--changelog-file", default=os.getenv("REMOTE_CHANGELOG_FILE", DEFAULT_CHANGELOG_FILE))
-    parser.add_argument("--api-url", default=os.getenv("LASTUDIO_API_URL", DEFAULT_API_URL), help="LA Studio API base URL")
+    parser.add_argument("--api-url", default=os.getenv("LASTUDIO_API_URL", DEFAULT_API_URL), help="LastStudio API base URL")
     parser.add_argument("--github-repo", default=os.getenv("CONFIG_GITHUB_REPO", DEFAULT_GITHUB_REPO))
     parser.add_argument("--github-branch", default=os.getenv("CONFIG_GITHUB_BRANCH", DEFAULT_GITHUB_BRANCH))
     parser.add_argument("--github-token", default=os.getenv("CONFIG_GITHUB_TOKEN") or os.getenv("GH_CONFIG_TOKEN"))
