@@ -1,6 +1,10 @@
 # 翼课校长 - 翼课学习中心答案提取器
 
 > 本项目已转为闭源开发，但仍会持续维护。本仓库继续面向普通用户提供安装包下载、使用教程、技术文档、更新日志和问题反馈。
+>
+> 🌐 **官方发布平台与主站**：[https://lastudio.cc](https://lastudio.cc)  
+> ⚡ **Eklose (翼课校长) 官方极速直链下载**：[https://lastudio.cc/download?app=eklose](https://lastudio.cc/download?app=eklose)（免登录、不限速）
+
 [![Kotlin](https://img.shields.io/badge/kotlin-2.4.20-7F52FF)](https://kotlinlang.org/)
 [![Compose](https://img.shields.io/badge/compose-4285F4)](https://developer.android.com/compose)
 [![miuix](https://img.shields.io/badge/UI-miuix-00A6FF)](https://github.com/miuix-kotlin-multiplatform/miuix)
@@ -46,10 +50,10 @@
 
 ### 第一步：先装上
 
-1. 打开 [releases 页面](https://github.com/laststudio/eklose/releases)
-2. 下载最新版本的 APK
+1. 打开 [官方极速直链下载](https://lastudio.cc/download?app=eklose) 或 [GitHub Releases 页面](https://github.com/laststudio/eklose/releases)
+2. 下载最新版本的 APK（推荐使用官方极速直链，免登录不限速）
 3. 安装到你的手机上
-4. 打开翼课校长 App
+4. 打开翼课校长 (Eklose) App
 
 如果手机提示“禁止安装未知来源应用”，按照系统提示允许安装即可。
 
@@ -214,7 +218,6 @@
 
 - [@专有商业软件许可与免责声明](./USER_AGREEMENT.md)
 - [@更新日志](./update.md)
-- [@项目约束](./AGENTS.md)
 
 ---
 
@@ -222,13 +225,14 @@
 
 - [laststudio/ekwing_get_answer](https://github.com/laststudio/ekwing_get_answer)
 - [laststudio/eklose](https://github.com/laststudio/eklose)
-- [laststudio/Fuck_ets100](https://github.com/qiuqiqiuqid/Fe)
+- [laststudio/Fuck_ets100](https://github.com/laststudio/Fuck_ets100)
 
 ---
 
 **有问题？找作者：**
-- GitHub: [issues 页面](https://github.com/laststudio/eklose/issues)
-- 官网: [lastudio.cc](https://lastudio.cc)
+- 官方发布平台: [LastStudio (lastudio.cc)](https://lastudio.cc)
+- 极速直链下载: [Eklose 官方极速下载通道](https://lastudio.cc/download?app=eklose)
+- GitHub: [Issues 页面](https://github.com/laststudio/eklose/issues)
 
 祝你使用愉快。
 

@@ -1,0 +1,38 @@
+name: 同步公开仓库文档
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'README.md'
+      - 'update.md'
+      - 'USER_AGREEMENT.md'
+      - '.github/workflows/sync-public-docs.yml'
+      - 'scripts/release/sync_public_docs.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-public-docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    name: 同步 laststudio/eklose 文档
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 同步 README 与更新日志到 laststudio/eklose
+        shell: bash
+        env:
+          PUBLIC_RELEASE_TOKEN: ${{ secrets.PUBLIC_RELEASE_TOKEN }}
+        run: >-
+          python scripts/release/sync_public_docs.py
+          --target-repo laststudio/eklose
+          --target-branch main
+          --commit-prefix "docs: sync from eklose-pro"
