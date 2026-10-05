@@ -40,7 +40,10 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -53,6 +56,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -776,6 +780,9 @@ private fun AnswerBottomSheet(
     selectedAnswer: SelectedAnswer?,
     onDismiss: () -> Unit,
 ) {
+    val configuration = LocalConfiguration.current
+    val maxSheetHeight = (configuration.screenHeightDp.dp * 0.72f).coerceAtLeast(320.dp)
+
     OverlayBottomSheet(
         show = selectedAnswer != null,
         title = selectedAnswer?.question?.order?.let { "$it 答案" },
@@ -785,6 +792,8 @@ private fun AnswerBottomSheet(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .heightIn(max = maxSheetHeight)
+                    .verticalScroll(rememberScrollState())
                     .padding(vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
@@ -798,7 +807,7 @@ private fun AnswerBottomSheet(
                     content = selectedAnswer.question.answer,
                     emphasized = true,
                 )
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(16.dp))
             }
         }
     }
@@ -850,129 +859,137 @@ private fun ClassRankBottomSheet(
     report: EkwingClassScoreReport?,
     onDismiss: () -> Unit,
 ) {
+    val configuration = LocalConfiguration.current
+    val maxSheetHeight = (configuration.screenHeightDp.dp * 0.72f).coerceAtLeast(320.dp)
+
     OverlayBottomSheet(
         show = show,
         title = "全班成绩榜单",
         onDismissRequest = onDismiss,
     ) {
         if (report != null) {
-            Column(
+            LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .heightIn(max = maxSheetHeight)
                     .padding(vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 if (report.className != null || report.userRank != null || report.userScore != null) {
-                    EkloseCard(
-                        modifier = Modifier.fillMaxWidth(),
-                        cornerRadius = EkloseCornerRadius.Nested,
-                        color = MiuixTheme.colorScheme.primary.copy(alpha = 0.08f),
-                        contentColor = MiuixTheme.colorScheme.onSurface,
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                    item {
+                        EkloseCard(
+                            modifier = Modifier.fillMaxWidth(),
+                            cornerRadius = EkloseCornerRadius.Nested,
+                            color = MiuixTheme.colorScheme.primary.copy(alpha = 0.08f),
+                            contentColor = MiuixTheme.colorScheme.onSurface,
                         ) {
-                            report.className?.takeIf { it.isNotBlank() }?.let {
-                                Text(
-                                    text = "班级：$it",
-                                    style = MiuixTheme.textStyles.body2,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MiuixTheme.colorScheme.primary,
-                                )
-                            }
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
+                            Column(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
                             ) {
-                                report.userRank?.let {
+                                report.className?.takeIf { it.isNotBlank() }?.let {
                                     Text(
-                                        text = "我的排名：第 $it 名",
-                                        style = MiuixTheme.textStyles.body2,
-                                        color = MiuixTheme.colorScheme.onSurface,
-                                    )
-                                }
-                                report.userScore?.takeIf { it.isNotBlank() }?.let {
-                                    Text(
-                                        text = "我的分数：$it",
+                                        text = "班级：$it",
                                         style = MiuixTheme.textStyles.body2,
                                         fontWeight = FontWeight.Bold,
                                         color = MiuixTheme.colorScheme.primary,
                                     )
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                ) {
+                                    report.userRank?.let {
+                                        Text(
+                                            text = "我的排名：第 $it 名",
+                                            style = MiuixTheme.textStyles.body2,
+                                            color = MiuixTheme.colorScheme.onSurface,
+                                        )
+                                    }
+                                    report.userScore?.takeIf { it.isNotBlank() }?.let {
+                                        Text(
+                                            text = "我的分数：$it",
+                                            style = MiuixTheme.textStyles.body2,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MiuixTheme.colorScheme.primary,
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
                 }
                 if (report.ranks.isNotEmpty()) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        report.ranks.forEach { item ->
-                            EkloseCard(
-                                modifier = Modifier.fillMaxWidth(),
-                                cornerRadius = EkloseCornerRadius.Nested,
-                                color = if (item.isSelf) {
-                                    MiuixTheme.colorScheme.primary.copy(alpha = 0.12f)
-                                } else {
-                                    MiuixTheme.colorScheme.surface
-                                },
-                                contentColor = MiuixTheme.colorScheme.onSurface,
-                                borderAlpha = if (item.isSelf) 0.3f else 0.08f,
+                    items(
+                        items = report.ranks,
+                        key = { "${it.index}_${it.name}_${it.studentNo}" },
+                    ) { item ->
+                        EkloseCard(
+                            modifier = Modifier.fillMaxWidth(),
+                            cornerRadius = EkloseCornerRadius.Nested,
+                            color = if (item.isSelf) {
+                                MiuixTheme.colorScheme.primary.copy(alpha = 0.12f)
+                            } else {
+                                MiuixTheme.colorScheme.surface
+                            },
+                            contentColor = MiuixTheme.colorScheme.onSurface,
+                            borderAlpha = if (item.isSelf) 0.3f else 0.08f,
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    Row(
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
+                                    Text(
+                                        text = "#${item.index}",
+                                        style = MiuixTheme.textStyles.body2,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (item.isSelf) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                    )
+                                    Column {
                                         Text(
-                                            text = "#${item.index}",
-                                            style = MiuixTheme.textStyles.body2,
-                                            fontWeight = FontWeight.Bold,
-                                            color = if (item.isSelf) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                            text = if (item.isSelf) "${item.name} (我)" else item.name,
+                                            style = MiuixTheme.textStyles.body1,
+                                            fontWeight = if (item.isSelf) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (item.isSelf) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurface,
                                         )
-                                        Column {
+                                        if (item.studentNo.isNotBlank()) {
                                             Text(
-                                                text = if (item.isSelf) "${item.name} (我)" else item.name,
-                                                style = MiuixTheme.textStyles.body1,
-                                                fontWeight = if (item.isSelf) FontWeight.Bold else FontWeight.Normal,
-                                                color = if (item.isSelf) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurface,
+                                                text = "学号：${item.studentNo}",
+                                                style = MiuixTheme.textStyles.body2,
+                                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                                             )
-                                            if (item.studentNo.isNotBlank()) {
-                                                Text(
-                                                    text = "学号：${item.studentNo}",
-                                                    style = MiuixTheme.textStyles.body2,
-                                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                                                )
-                                            }
                                         }
                                     }
-                                    Text(
-                                        text = item.score,
-                                        style = MiuixTheme.textStyles.body1,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (item.isSelf) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurface,
-                                    )
                                 }
+                                Text(
+                                    text = item.score,
+                                    style = MiuixTheme.textStyles.body1,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (item.isSelf) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurface,
+                                )
                             }
                         }
                     }
                 } else {
-                    Text(
-                        text = "暂无具体榜单信息",
-                        style = MiuixTheme.textStyles.body2,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        modifier = Modifier.padding(vertical = 16.dp),
-                    )
+                    item {
+                        Text(
+                            text = "暂无具体榜单信息",
+                            style = MiuixTheme.textStyles.body2,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            modifier = Modifier.padding(vertical = 16.dp),
+                        )
+                    }
                 }
-                Spacer(modifier = Modifier.height(8.dp))
+                item {
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
             }
         }
     }
