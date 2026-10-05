@@ -39,7 +39,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.DropdownEntry
+import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.TextButton
+import top.yukonga.miuix.kmp.menu.OverlayIconDropdownMenu
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
@@ -47,6 +51,8 @@ import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.basic.SnackbarHostState
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.MoreCircle
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import java.net.URL
 import java.net.URLConnection
@@ -133,6 +139,28 @@ private fun AnnouncementScreen(
             },
         )
     }
+    val updateEntry = DropdownEntry(
+        items = listOf(
+            DropdownItem(
+                text = "检测更新",
+                onClick = {
+                    scope.launch {
+                        runCatching { EkloseRemoteConfigManager.checkStatus(context) }
+                            .onSuccess { status ->
+                                if (status.showUpdateDialog) {
+                                    updateDialogStatus = status
+                                } else {
+                                    snackbarHostState.showSnackbar("当前已是最新版本")
+                                }
+                            }
+                            .onFailure {
+                                snackbarHostState.showSnackbar("检测更新失败")
+                            }
+                    }
+                },
+            ),
+        ),
+    )
 
     LaunchedEffect(Unit) {
         if (remoteStatus == null) {
@@ -184,24 +212,13 @@ private fun AnnouncementScreen(
                 onBack = onBack,
                 scrollBehavior = scrollBehavior,
                 actions = {
-                    TextButton(
-                        text = "检测更新",
-                        onClick = {
-                            scope.launch {
-                                runCatching { EkloseRemoteConfigManager.checkStatus(context) }
-                                    .onSuccess { status ->
-                                        if (status.showUpdateDialog) {
-                                            updateDialogStatus = status
-                                        } else {
-                                            snackbarHostState.showSnackbar("当前已是最新版本")
-                                        }
-                                    }
-                                    .onFailure {
-                                        snackbarHostState.showSnackbar("检测更新失败")
-                                    }
-                            }
-                        },
-                    )
+                    OverlayIconDropdownMenu(entry = updateEntry) {
+                        Icon(
+                            imageVector = MiuixIcons.MoreCircle,
+                            contentDescription = "更多操作",
+                            tint = MiuixTheme.colorScheme.onSurface,
+                        )
+                    }
                 },
             )
             }
