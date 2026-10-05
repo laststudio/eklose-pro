@@ -18,6 +18,7 @@ private const val BASE_URL = "https://mapi.ekwing.com"
 private const val LOGIN_SCHOOL_PATH = "/student/User/loginschool"
 private const val LOGIN_ACCOUNT_PATH = "/student/User/login"
 private const val SEARCH_SCHOOL_PATH = "/student/user/searchschool"
+const val COUNTY_SCHOOL_PATH = "/student/user/scgetschool"
 
 data class EkwingSchool(
     val schoolId: String,
@@ -66,6 +67,17 @@ class EkwingAuthClient(context: Context) {
         payload["key"] = keyword
         payload["page"] = page.toString()
         val body = postForm(SEARCH_SCHOOL_PATH, payload)
+        if (body.optInt("status", -1) != 0) {
+            throw RuntimeException(errorMessage(body))
+        }
+        return extractList(body.opt("data")).mapNotNull(::normalizeSchool)
+    }
+
+    fun getSchoolsByCounty(countyId: String, studySection: String = "0"): List<EkwingSchool> {
+        val payload = commonParams().toMutableMap()
+        payload["id"] = countyId
+        payload["st_id"] = studySection
+        val body = postForm(COUNTY_SCHOOL_PATH, payload)
         if (body.optInt("status", -1) != 0) {
             throw RuntimeException(errorMessage(body))
         }

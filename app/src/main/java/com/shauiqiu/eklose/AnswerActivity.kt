@@ -18,6 +18,8 @@ import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
 import android.util.Log
+import org.json.JSONArray
+import org.json.JSONObject
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -229,6 +231,18 @@ private fun AnswerScreen(
                             sections = shareableSections,
                         )
                         snackbarScope.launch { snackbarHostState.showSnackbar("已复制答案到剪贴板") }
+                    },
+                ),
+                DropdownItem(
+                    text = "复制 JSON 答案",
+                    enabled = canShareAnswers,
+                    onClick = {
+                        copyAnswerJson(
+                            context = context,
+                            paperTitle = topBarTitle,
+                            sections = shareableSections,
+                        )
+                        snackbarScope.launch { snackbarHostState.showSnackbar("已复制 JSON 答案到剪贴板") }
                     },
                 ),
                 DropdownItem(
@@ -451,6 +465,33 @@ private fun copyAnswerText(
     val text = formatAnswerAsText(paperTitle, sections)
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     clipboard.setPrimaryClip(ClipData.newPlainText(paperTitle, text))
+}
+
+private fun copyAnswerJson(
+    context: Context,
+    paperTitle: String,
+    sections: List<AnswerSection>,
+) {
+    val json = formatAnswerAsJson(sections)
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    clipboard.setPrimaryClip(ClipData.newPlainText(paperTitle, json))
+}
+
+private fun formatAnswerAsJson(sections: List<AnswerSection>): String {
+    val array = JSONArray()
+    var globalIndex = 1
+    sections.forEach { section ->
+        section.questions.forEach { question ->
+            array.put(JSONObject().apply {
+                put("index", globalIndex++)
+                put("sectionTitle", section.title)
+                put("order", question.order)
+                put("question", question.question)
+                put("answer", question.answer)
+            })
+        }
+    }
+    return array.toString(2)
 }
 
 private fun formatAnswerAsText(
