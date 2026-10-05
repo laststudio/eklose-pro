@@ -3,7 +3,10 @@ package com.shauiqiu.eklose
 import org.json.JSONObject
 import org.json.JSONArray
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class EkwingAnswerReaderParserTest {
@@ -1737,5 +1740,231 @@ class EkwingAnswerReaderParserTest {
 
     private fun mojibake(value: String): String {
         return value.toByteArray(Charsets.UTF_8).toString(Charsets.ISO_8859_1)
+    }
+
+    @Test
+    fun parseJsonExamSectionsProducesMultipleSections() {
+        val root = JSONObject(
+            """
+            {
+              "model_score_infos": [
+                {
+                  "data": {
+                    "model_info": {
+                      "model_type": "1",
+                      "model_type_name": "模仿朗读",
+                      "real_text": "Good morning, everyone. Welcome to our English class."
+                    }
+                  }
+                },
+                {
+                  "data": {
+                    "model_info": {
+                      "model_type": "7",
+                      "model_type_name": "听选信息",
+                      "desc": "听录音，选出正确的选项",
+                      "ques_list": [
+                        {
+                          "title_text": "Where is Peter going this weekend?",
+                          "answer": ["To the national museum"]
+                        },
+                        {
+                          "title_text": "How will they get there?",
+                          "answer": ["By subway"]
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "data": {
+                    "model_info": {
+                      "model_type": "8",
+                      "model_type_name": "回答问题",
+                      "answer_tip": "根据实际情况回答以下问题",
+                      "ques_list": [
+                        {
+                          "title_text": "What do you like to do in your free time?",
+                          "answer": ["I like reading books and playing basketball."]
+                        }
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+            """.trimIndent()
+        )
+
+        val sections = parseJsonExamSections(root, examTitle = "期中英语口语测试", examSummary = "学习中心考试")
+
+        assertEquals(3, sections.size)
+
+        // Section 1: 模仿朗读
+        val sec1 = sections[0]
+        assertEquals("模仿朗读", sec1.title)
+        assertEquals("1", sec1.category)
+        assertEquals("Good morning, everyone. Welcome to our English class.", sec1.originalText)
+        assertEquals(1, sec1.questions.size)
+        assertEquals("Q1", sec1.questions[0].order)
+        assertEquals("朗读文本", sec1.questions[0].question)
+        assertEquals("Good morning, everyone. Welcome to our English class.", sec1.questions[0].answer)
+
+        // Section 2: 听选信息
+        val sec2 = sections[1]
+        assertEquals("听选信息", sec2.title)
+        assertEquals("7", sec2.category)
+        assertEquals("听录音，选出正确的选项", sec2.originalText)
+        assertEquals(2, sec2.questions.size)
+        assertEquals("Q1", sec2.questions[0].order)
+        assertEquals("Where is Peter going this weekend?", sec2.questions[0].question)
+        assertEquals("To the national museum", sec2.questions[0].answer)
+        assertEquals("Q2", sec2.questions[1].order)
+        assertEquals("How will they get there?", sec2.questions[1].question)
+        assertEquals("By subway", sec2.questions[1].answer)
+
+        // Section 3: 回答问题
+        val sec3 = sections[2]
+        assertEquals("回答问题", sec3.title)
+        assertEquals("8", sec3.category)
+        assertEquals("根据实际情况回答以下问题", sec3.originalText)
+        assertEquals(1, sec3.questions.size)
+        assertEquals("Q1", sec3.questions[0].order)
+        assertEquals("What do you like to do in your free time?", sec3.questions[0].question)
+        assertEquals("I like reading books and playing basketball.", sec3.questions[0].answer)
+    }
+
+    @Test
+    fun extractClassScoreReportFromUsefulCandidates() {
+        val scoreData = JSONObject(
+            """
+            {
+              "useful_candidates": [
+                {
+                  "user_rank": 2,
+                  "user_score": "95.5",
+                  "classes": "八年级(3)班",
+                  "self_ranks": [
+                    {
+                      "index": 1,
+                      "real_name": "张小明",
+                      "score": "98.0",
+                      "is_self": 0,
+                      "user_info": {
+                        "nicename": "小明",
+                        "classes": "八年级(3)班",
+                        "student_no": "2024001"
+                      }
+                    },
+                    {
+                      "index": 2,
+                      "real_name": "李华",
+                      "score": "95.5",
+                      "is_self": 1,
+                      "user_info": {
+                        "nicename": "李华",
+                        "classes": "八年级(3)班",
+                        "student_no": "2024002"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+            """.trimIndent()
+        )
+
+        val report = extractClassScoreReport(scoreData)
+        assertNotNull(report)
+        assertEquals(2, report?.userRank)
+        assertEquals("95.5", report?.userScore)
+        assertEquals("八年级(3)班", report?.className)
+        assertEquals(2, report?.ranks?.size)
+
+        val rank0 = report!!.ranks[0]
+        assertEquals(1, rank0.index)
+        assertEquals("张小明", rank0.name)
+        assertEquals("98.0", rank0.score)
+        assertFalse(rank0.isSelf)
+        assertEquals("八年级(3)班", rank0.className)
+        assertEquals("2024001", rank0.studentNo)
+
+        val rank1 = report.ranks[1]
+        assertEquals(2, rank1.index)
+        assertEquals("李华", rank1.name)
+        assertEquals("95.5", rank1.score)
+        assertTrue(rank1.isSelf)
+        assertEquals("八年级(3)班", rank1.className)
+        assertEquals("2024002", rank1.studentNo)
+    }
+
+    @Test
+    fun extractClassScoreReportWithNestedUserRankObject() {
+        val scoreData = JSONObject(
+            """
+            {
+              "user_rank": {
+                "rank": 3,
+                "score": "91.0",
+                "classes": "初一(1)班"
+              },
+              "self_ranks": [
+                {
+                  "index": 3,
+                  "score": "91.0",
+                  "is_self": true,
+                  "user_info": {
+                    "nicename": "王小华",
+                    "classes": "初一(1)班",
+                    "student_no": "103"
+                  }
+                }
+              ]
+            }
+            """.trimIndent()
+        )
+
+        val report = extractClassScoreReport(scoreData)
+        assertNotNull(report)
+        assertEquals(3, report?.userRank)
+        assertEquals("91.0", report?.userScore)
+        assertEquals("初一(1)班", report?.className)
+        assertEquals(1, report?.ranks?.size)
+        assertEquals("王小华", report!!.ranks[0].name)
+        assertTrue(report.ranks[0].isSelf)
+    }
+
+    @Test
+    fun sourceStateSerializationPreservesClassScoreReport() {
+        val report = EkwingClassScoreReport(
+            userRank = 1,
+            userScore = "100",
+            className = "高一(1)班",
+            ranks = listOf(
+                EkwingClassRankItem(
+                    index = 1,
+                    name = "学霸",
+                    score = "100",
+                    isSelf = true,
+                    className = "高一(1)班",
+                    studentNo = "001"
+                )
+            )
+        )
+        val originalState = EkwingAnswerSourceState(
+            papers = listOf(EkwingAnswerPaper(key = "exam:123", title = "期末考试", summary = "测试")),
+            classScoreReportByPaperKey = mapOf("exam:123" to report)
+        )
+        val json = sourceStateToJson(originalState)
+        val restoredState = sourceStateFromJson(json)
+
+        val restoredReport = restoredState.classScoreReportByPaperKey["exam:123"]
+        assertNotNull(restoredReport)
+        assertEquals(1, restoredReport?.userRank)
+        assertEquals("100", restoredReport?.userScore)
+        assertEquals("高一(1)班", restoredReport?.className)
+        assertEquals(1, restoredReport?.ranks?.size)
+        assertEquals("学霸", restoredReport?.ranks?.first()?.name)
+        assertTrue(restoredReport?.ranks?.first()?.isSelf == true)
     }
 }

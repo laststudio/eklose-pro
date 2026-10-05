@@ -198,6 +198,8 @@ private fun AnswerScreen(
     var selectedAnswer by remember { mutableStateOf<SelectedAnswer?>(null) }
     val states by EkwingAnswerState.states.collectAsState()
     val sourceState = states[source] ?: EkwingAnswerSourceState()
+    val classScoreReport = sourceState.classScoreReportByPaperKey[paperKey]
+    var showClassRankBottomSheet by remember { mutableStateOf(false) }
     val parseState = sourceState.parseStateByPaperKey[paperKey]
     val loadedSections = sourceState.sectionsByPaperKey[paperKey]?.toUiAnswerSections()
     val answerSections = loadedSections ?: answerPlaceholderSections(paperKey, parseState, source)
@@ -315,6 +317,73 @@ private fun AnswerScreen(
                         )
                     }
                 }
+                if (classScoreReport != null && (classScoreReport.userRank != null || classScoreReport.ranks.isNotEmpty())) {
+                    item {
+                        GroupSection(title = "考试成绩与班级排名") {
+                            val userScoreText = classScoreReport.userScore?.ifBlank { null }
+                                ?: classScoreReport.ranks.firstOrNull { it.isSelf }?.score?.ifBlank { null }
+                                ?: "暂无"
+                            val userRankText = classScoreReport.userRank?.let { "第 $it 名" }
+                                ?: classScoreReport.ranks.firstOrNull { it.isSelf }?.let { "第 ${it.index} 名" }
+                                ?: "暂无"
+                            val classNameText = classScoreReport.className?.ifBlank { null }
+                                ?: classScoreReport.ranks.firstOrNull { it.className.isNotBlank() }?.className
+                                ?: "未指定班级"
+
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 18.dp, vertical = 14.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column {
+                                        Text(
+                                            text = "个人得分",
+                                            style = MiuixTheme.textStyles.body2,
+                                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                        )
+                                        Text(
+                                            text = userScoreText,
+                                            style = MiuixTheme.textStyles.title2,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MiuixTheme.colorScheme.primary,
+                                        )
+                                    }
+                                    Column(horizontalAlignment = Alignment.End) {
+                                        Text(
+                                            text = "班级排名",
+                                            style = MiuixTheme.textStyles.body2,
+                                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                        )
+                                        Text(
+                                            text = userRankText,
+                                            style = MiuixTheme.textStyles.title2,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MiuixTheme.colorScheme.onSurfaceContainer,
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = "班级：$classNameText",
+                                    style = MiuixTheme.textStyles.body2,
+                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                )
+                            }
+                            GroupDivider()
+                            ArrowPreference(
+                                title = "全班成绩榜单",
+                                summary = if (classScoreReport.ranks.isNotEmpty()) "共 ${classScoreReport.ranks.size} 名学生，点击查看榜单" else "点击查看成绩榜单",
+                                onClick = { showClassRankBottomSheet = true },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
+                }
                 answerSections.forEach { section ->
                     item {
                         AnswerSectionBlock(
@@ -333,6 +402,11 @@ private fun AnswerScreen(
             AnswerBottomSheet(
                 selectedAnswer = selectedAnswer,
                 onDismiss = { selectedAnswer = null },
+            )
+            ClassRankBottomSheet(
+                show = showClassRankBottomSheet,
+                report = classScoreReport,
+                onDismiss = { showClassRankBottomSheet = false },
             )
         }
     }
@@ -724,6 +798,140 @@ private fun AnswerBottomSheet(
                 )
                     Spacer(modifier = Modifier.height(8.dp))
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ClassRankBottomSheet(
+    show: Boolean,
+    report: EkwingClassScoreReport?,
+    onDismiss: () -> Unit,
+) {
+    OverlayBottomSheet(
+        show = show,
+        title = "全班成绩榜单",
+        onDismissRequest = onDismiss,
+    ) {
+        if (report != null) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                if (report.className != null || report.userRank != null || report.userScore != null) {
+                    EkloseCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        cornerRadius = EkloseCornerRadius.Nested,
+                        color = MiuixTheme.colorScheme.primary.copy(alpha = 0.08f),
+                        contentColor = MiuixTheme.colorScheme.onSurface,
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            report.className?.takeIf { it.isNotBlank() }?.let {
+                                Text(
+                                    text = "班级：$it",
+                                    style = MiuixTheme.textStyles.body2,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MiuixTheme.colorScheme.primary,
+                                )
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                report.userRank?.let {
+                                    Text(
+                                        text = "我的排名：第 $it 名",
+                                        style = MiuixTheme.textStyles.body2,
+                                        color = MiuixTheme.colorScheme.onSurface,
+                                    )
+                                }
+                                report.userScore?.takeIf { it.isNotBlank() }?.let {
+                                    Text(
+                                        text = "我的分数：$it",
+                                        style = MiuixTheme.textStyles.body2,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MiuixTheme.colorScheme.primary,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                if (report.ranks.isNotEmpty()) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        report.ranks.forEach { item ->
+                            EkloseCard(
+                                modifier = Modifier.fillMaxWidth(),
+                                cornerRadius = EkloseCornerRadius.Nested,
+                                color = if (item.isSelf) {
+                                    MiuixTheme.colorScheme.primary.copy(alpha = 0.12f)
+                                } else {
+                                    MiuixTheme.colorScheme.surface
+                                },
+                                contentColor = MiuixTheme.colorScheme.onSurface,
+                                borderAlpha = if (item.isSelf) 0.3f else 0.08f,
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Text(
+                                            text = "#${item.index}",
+                                            style = MiuixTheme.textStyles.body2,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (item.isSelf) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                        )
+                                        Column {
+                                            Text(
+                                                text = if (item.isSelf) "${item.name} (我)" else item.name,
+                                                style = MiuixTheme.textStyles.body1,
+                                                fontWeight = if (item.isSelf) FontWeight.Bold else FontWeight.Normal,
+                                                color = if (item.isSelf) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurface,
+                                            )
+                                            if (item.studentNo.isNotBlank()) {
+                                                Text(
+                                                    text = "学号：${item.studentNo}",
+                                                    style = MiuixTheme.textStyles.body2,
+                                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                                )
+                                            }
+                                        }
+                                    }
+                                    Text(
+                                        text = item.score,
+                                        style = MiuixTheme.textStyles.body1,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (item.isSelf) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurface,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    Text(
+                        text = "暂无具体榜单信息",
+                        style = MiuixTheme.textStyles.body2,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        modifier = Modifier.padding(vertical = 16.dp),
+                    )
+                }
+                Spacer(modifier = Modifier.height(8.dp))
             }
         }
     }
