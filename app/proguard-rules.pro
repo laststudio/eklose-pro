@@ -14,6 +14,9 @@
 # libekwing_resolver.so 的 JNI 绑定：JNI_OnLoad 动态注册按类名查找，不可混淆改名
 -keep class com.shauiqiu.eklose.EkwingResolverNative { *; }
 
+# 签名钉扎：解析库按类名/字段名读取签名指纹，不可混淆
+-keep class com.shauiqiu.eklose.BuildConfig { *; }
+
 # Aggressive R8 / ProGuard Optimization & Obfuscation
 -optimizationpasses 5
 -overloadaggressively

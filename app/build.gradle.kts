@@ -43,6 +43,15 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            // 签名钉扎：与官方签名证书一致才允许使用解析功能（libekwing_resolver
+            // 在每次 JNI 调用前比对运行 APK 的签名证书 SHA-256）。重签名换壳直接失效。
+            // 仅 release 定义；debug 不定义 → 解析库跳过校验，开发调试不受影响。
+            // ⚠️ 换签名证书时必须同步更新此值，否则所有正式用户都会解析失败。
+            buildConfigField(
+                "String",
+                "EXPECTED_SIGNATURE_SHA256",
+                "\"95fdebb3682f7c529584cfe11f27b73557426d211d53688beaa18434fdd84cfe\"",
+            )
             if (hasReleaseSigningConfig) {
                 signingConfig = signingConfigs.getByName("release")
             }
@@ -69,6 +78,8 @@ android {
     }
     buildFeatures {
         compose = true
+        // 解析库的签名钉扎依赖生成的 BuildConfig 常量（见下）
+        buildConfig = true
     }
     testOptions {
         unitTests.isReturnDefaultValues = true
