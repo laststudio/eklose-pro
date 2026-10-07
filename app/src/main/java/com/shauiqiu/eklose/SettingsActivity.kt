@@ -5,6 +5,11 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AccountCircle
+import androidx.compose.material.icons.rounded.DriveFileRenameOutline
+import androidx.compose.material.icons.rounded.Palette
+import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,6 +38,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -49,6 +55,7 @@ import com.shauiqiu.eklose.ui.theme.LocalEkloseCardSurface
 import com.shauiqiu.eklose.ui.theme.LocalEklosePageBackground
 import com.shauiqiu.eklose.ui.theme.rememberEklosePaletteStyle
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
+import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
@@ -161,6 +168,9 @@ internal fun SettingsScreen(
                     GroupSection(title = "账号与列表") {
                         GroupItem(
                             title = "保持登录状态",
+                            leading = {
+                                SettingsLeadingIcon(Icons.Rounded.AccountCircle, "保持登录状态")
+                            },
                             summary = if (saveLogin) {
                                 "记住账号密码，重启后保持登录"
                             } else {
@@ -179,6 +189,9 @@ internal fun SettingsScreen(
                         GroupDivider()
                         GroupItem(
                             title = "自动刷新 token",
+                            leading = {
+                                SettingsLeadingIcon(Icons.Rounded.Sync, "自动刷新 token")
+                            },
                             summary = if (autoRefreshToken) {
                                 "登录凭证失效时，使用已保存的账号密码自动刷新"
                             } else {
@@ -197,6 +210,9 @@ internal fun SettingsScreen(
                         GroupDivider()
                         GroupItem(
                             title = "实名登录姓名替换",
+                            leading = {
+                                SettingsLeadingIcon(Icons.Rounded.DriveFileRenameOutline, "实名登录姓名替换")
+                            },
                             summary = if (aliasFrom.isBlank() || aliasTo.isBlank()) {
                                 "未设置"
                             } else {
@@ -214,6 +230,9 @@ internal fun SettingsScreen(
                     GroupSection(title = "界面") {
                         GroupItem(
                             title = "主题",
+                            leading = {
+                                SettingsLeadingIcon(Icons.Rounded.Palette, "主题")
+                            },
                             summary = "自定义主题选项",
                             onClick = {
                                 context.startActivity(Intent(context, ThemeSettingsActivity::class.java))
@@ -272,6 +291,16 @@ private fun ThemePreviewDot(color: Color) {
         color = color,
         contentColor = Color.Transparent,
     ) {}
+}
+
+@Composable
+private fun SettingsLeadingIcon(icon: ImageVector, description: String) {
+    Icon(
+        imageVector = icon,
+        contentDescription = description,
+        modifier = Modifier.padding(end = 6.dp).size(24.dp),
+        tint = MiuixTheme.colorScheme.onBackground,
+    )
 }
 
 @Composable
