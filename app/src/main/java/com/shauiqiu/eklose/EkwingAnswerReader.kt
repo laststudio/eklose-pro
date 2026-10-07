@@ -931,13 +931,15 @@ class EkwingAnswerReader(private val context: Context) {
             ?: "考试答案"
         val examSummary = exam.toAnswerPaper(0).summary
 
-        val parsedModelSections = parseJsonExamSections(modelScoreInfos, examTitle, examSummary)
+        val parsedModelSections = (EkwingResolverGateway.examModelSections(modelScoreInfos)
+            ?: parseJsonExamSections(modelScoreInfos, examTitle, examSummary))
             .filter { it.questions.isNotEmpty() }
         if (parsedModelSections.isNotEmpty()) {
             return parsedModelSections
         }
 
-        val parsedScoreSections = parseScoreInfoExamSections(scoreInfo, examTitle, examSummary)
+        val parsedScoreSections = (EkwingResolverGateway.scorePageSections(scoreInfo)
+            ?: parseScoreInfoExamSections(scoreInfo, examTitle, examSummary))
             .filter { it.questions.isNotEmpty() }
         if (parsedScoreSections.isNotEmpty()) {
             return parsedScoreSections
@@ -1532,6 +1534,8 @@ private fun mergeJsonObjects(first: JSONObject?, second: JSONObject): JSONObject
 
 internal object EkwingAnswerParser {
     fun parseHomeworkAnswerQuestions(value: Any?): List<EkwingAnswerQuestion> {
+        // so 优先：解析口径单一事实源（ekwing_resolver）；so 不可用或返回为空时回退本地实现
+        EkwingResolverGateway.homeworkQuestions(value)?.let { return it }
         val normalized = normalizeJson(value)
         val answerRoot = (normalized as? JSONObject)?.optJSONObject("ans")
         val answers = answerRoot?.optJSONArray("answers")
@@ -1584,6 +1588,8 @@ internal fun examAnswerQuestions(scoreInfo: Any?, modelScoreInfos: Any?): List<E
 }
 
 internal fun parseJsonExamAnswers(root: Any?): List<EkwingAnswerQuestion> {
+    // so 优先：模块成绩逐题答案（与 ekwing_resolver 真实语料对拍 0 差异的那条口径）
+    EkwingResolverGateway.examQuestions(root)?.let { return it }
     val questions = mutableListOf<EkwingAnswerQuestion>()
     extractModelScoreItems(root).forEach { item ->
         val data = (normalizeJson(item.opt("data")) as? JSONObject) ?: item

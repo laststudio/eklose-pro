@@ -21,6 +21,10 @@ object EkwingResolverBootstrap {
     @Volatile
     private var configured = false
 
+    /** 远程配置到达后缓存的公钥；ensureConfigured 兜底时优先用它。 */
+    @Volatile
+    private var lastSigningPublicKey: String = ""
+
     /** 是否已完成配置（幂等，重复调用只生效一次；换钥场景重启进程生效）。 */
     val isConfigured: Boolean
         get() = configured
@@ -30,52 +34,47 @@ object EkwingResolverBootstrap {
      * signingPublicKey 传空串时使用 so 内置公钥。
      */
     suspend fun configure(signingPublicKey: String, appVersionCode: Long) {
-        if (configured) return
+        lastSigningPublicKey = signingPublicKey
         withContext(Dispatchers.IO) {
-            synchronized(this@EkwingResolverBootstrap) {
-                if (configured) return@withContext
-                val rc = runCatching {
-                    EkwingResolverNative.setAuthConfig(
-                        baseUrl = BASE_URL,
-                        softwareKey = SOFTWARE_KEY,
-                        featureKey = FEATURE_KEY,
-                        publicKeyB64 = signingPublicKey,
-                        appVersionCode = appVersionCode,
-                    )
-                }.getOrElse { error ->
-                    Log.w(TAG, "解析器 so 初始化失败: ${error.javaClass.simpleName}: ${error.message}")
-                    return@withContext
-                }
-                if (rc != 0) {
-                    Log.w(TAG, "解析器授权配置被拒绝: rc=$rc")
-                    return@withContext
-                }
-                EkwingResolverNative.setAuthEnabled(true)
-                configured = true
-                Log.i(TAG, "解析器授权已启用")
-            }
+            configureInternal(signingPublicKey, appVersionCode)
         }
     }
 
     /**
-     * 主动执行一次授权（诊断/预热 grant 缓存）。返回错误码，null 表示授权通过。
-     * 仅在已 configure 后调用；失败只上报不抛出，不阻塞任何 UI。
+     * 解析调用前的兜底：远程配置还没到达（checkStatus 尚未完成）时用
+     * 内置公钥先配置上，保证 so 解析可用。幂等。
      */
-    suspend fun probe(): String? {
-        if (!configured) return "auth_not_configured"
-        return withContext(Dispatchers.IO) {
-            runCatching {
-                val response = EkwingResolverNative.authorizeFeature()
-                val json = org.json.JSONObject(response)
-                if (json.optBoolean("allowed", false) && json.has("grant")) {
-                    null
-                } else {
-                    json.optJSONObject("error")?.optString("code") ?: "unknown"
-                }
+    fun ensureConfigured() {
+        if (configured) return
+        val versionCode = runCatching {
+            EkloseApplication.appContext.packageManager
+                .getPackageInfo(EkloseApplication.appContext.packageName, 0).longVersionCode
+        }.getOrDefault(0L)
+        configureInternal(lastSigningPublicKey, versionCode)
+    }
+
+    private fun configureInternal(signingPublicKey: String, appVersionCode: Long) {
+        synchronized(this@EkwingResolverBootstrap) {
+            if (configured) return
+            val rc = runCatching {
+                EkwingResolverNative.setAuthConfig(
+                    baseUrl = BASE_URL,
+                    softwareKey = SOFTWARE_KEY,
+                    featureKey = FEATURE_KEY,
+                    publicKeyB64 = signingPublicKey,
+                    appVersionCode = appVersionCode,
+                )
             }.getOrElse { error ->
-                Log.w(TAG, "解析器授权探测失败: ${error.message}")
-                "network_error"
+                Log.w(TAG, "解析器 so 初始化失败: ${error.javaClass.simpleName}: ${error.message}")
+                return
             }
+            if (rc != 0) {
+                Log.w(TAG, "解析器授权配置被拒绝: rc=$rc")
+                return
+            }
+            EkwingResolverNative.setAuthEnabled(true)
+            configured = true
+            Log.i(TAG, "解析器授权已启用")
         }
     }
 }
