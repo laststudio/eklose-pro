@@ -17,19 +17,37 @@ internal class EkwingResolverDeniedException(
  * libekwing_resolver.so 的解析网关：把 EkwingAnswerReader 的答案解析切到
  * so 的 resolveRequest 契约入口（解析口径的单一事实源在 ekwing_resolver 仓库）。
  *
- * 契约语义（三条边界必须分清）：
- *   1. so 拒绝（ok=false：功能停用/软件急停/限流/验签失败等）→ 抛 [EkwingResolverDeniedException]，
- *      **绝不回退本地 Kotlin 解析**——否则后台开关形同虚设；
- *   2. so 不可用（so 缺失/JNI 加载失败）→ 同样抛出，不给"删 so 绕过鉴权"留口子；
- *   3. 授权通过但 so 没解析出数据（返回空）→ 返回 null，调用方可回退本地启发式
+ * 契约语义（四条边界必须分清）：
+ *   1. so 拒绝（ok=false：功能停用/软件急停/限流/验签失败等，仅应用进程内可能）→ 抛
+ *      [EkwingResolverDeniedException]，**绝不回退本地 Kotlin 解析**——否则后台开关形同虚设；
+ *   2. so 不可用（so 缺失/JNI 加载失败，仅应用进程内可能）→ 同样抛出，
+ *      不给"删 so 绕过鉴权"留口子；
+ *   3. 应用进程外（JVM 单测 / 桌面工具等无 Android 运行时环境）→ 返回 null 交回本地实现。
+ *      正式构建里 Application.onCreate 先于一切解析初始化 appContext，
+ *      所以真实用户路径永远走 1/2，不会落到这条；
+ *   4. 授权通过但 so 没解析出数据（返回空）→ 返回 null，调用方可回退本地启发式
  *      （so 已被咨询并放行，本地抢救只是补充，不构成绕过）。
  * 解析类 op 在 Android 目标上由 so 契约层强制授权（answer_parser 开关式鉴权）。
  */
 internal object EkwingResolverGateway {
     private const val TAG = "EkwingResolverGateway"
 
+    /**
+     * 是否运行在本应用进程内。
+     * appContext 由 EkloseApplication.onCreate 初始化——真实启动必然已就绪；
+     * JVM 单测（testDebugUnitTest）等无 Android 运行时的环境访问会抛异常，返回 false。
+     */
+    private fun runningInAppProcess(): Boolean = runCatching {
+        EkloseApplication.appContext
+        true
+    }.getOrDefault(false)
+
     /** 统一契约调用：返回响应信封；拒绝/不可用抛 [EkwingResolverDeniedException]。阻塞调用，必须在 Dispatchers.IO 上。 */
-    fun callOp(op: String, payload: JSONObject): JSONObject {
+    fun callOp(op: String, payload: JSONObject): JSONObject? {
+        if (!runningInAppProcess()) {
+            Log.d(TAG, "非应用进程（单测/桌面），op=$op 交回本地实现")
+            return null
+        }
         return runCatching {
             EkwingResolverBootstrap.ensureConfigured()
             val request = JSONObject().apply {
@@ -81,6 +99,7 @@ internal object EkwingResolverGateway {
      * 与 [callOp] 的硬停语义互补：解析新数据无法授权即停止；展示既有缓存只有明确拒绝才收回。
      */
     fun explicitDenialOrNull(): EkwingResolverDeniedException? {
+        if (!runningInAppProcess()) return null
         return runCatching {
             EkwingResolverBootstrap.ensureConfigured()
             val response = JSONObject(EkwingResolverNative.authorizeFeature())
@@ -105,7 +124,7 @@ internal object EkwingResolverGateway {
     fun examQuestions(modelScoreInfos: Any?): List<EkwingAnswerQuestion>? {
         val envelope = callOp("parse_exam_answers", JSONObject().apply {
             put("model_scores", wrapAny(modelScoreInfos))
-        })
+        }) ?: return null
         val rows = envelope.optJSONArray("result") ?: return null
         return rows.toQuestions().takeIf { list -> list.isNotEmpty() }
     }
@@ -118,7 +137,7 @@ internal object EkwingResolverGateway {
     fun examModelSections(modelScoreInfos: Any?): List<EkwingAnswerSection>? {
         val envelope = callOp("parse_exam_answers", JSONObject().apply {
             put("model_scores", wrapAny(modelScoreInfos))
-        })
+        }) ?: return null
         val rows = envelope.optJSONArray("result") ?: return null
         if (rows.length() == 0) return null
 
@@ -180,7 +199,7 @@ internal object EkwingResolverGateway {
         val envelope = callOp("parse_homework_answers", JSONObject().apply {
             put("data", wrapAny(answerData))
             put("source", "getHwAns")
-        })
+        }) ?: return null
         val rows = envelope.optJSONArray("result") ?: return null
         return rows.toQuestions().takeIf { list -> list.isNotEmpty() }
     }
@@ -193,7 +212,7 @@ internal object EkwingResolverGateway {
     fun scorePageSections(scoreInfo: Any?): List<EkwingAnswerSection>? {
         val structured = callOp("parse_score_report", JSONObject().apply {
             put("score_data", wrapAny(scoreInfo))
-        })
+        }) ?: return null
         val report = structured.optJSONObject("result") ?: return null
         if (!report.optBoolean("found", false)) return null
 
@@ -201,7 +220,7 @@ internal object EkwingResolverGateway {
             put("structured_report", report)
             put("answers_by_question", JSONArray())
             put("score_globals", wrapAny(scoreInfo))
-        })
+        }) ?: return null
         val rows = sheet.optJSONObject("result")?.optJSONArray("questions") ?: return null
         if (rows.length() == 0) return null
 
