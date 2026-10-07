@@ -114,6 +114,7 @@ import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
 import top.yukonga.miuix.kmp.basic.NavigationBar
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
+import top.yukonga.miuix.kmp.basic.TopAppBarState
 import top.yukonga.miuix.kmp.basic.NavigationRail
 import top.yukonga.miuix.kmp.basic.NavigationRailItem
 import top.yukonga.miuix.kmp.basic.NavigationRailValue
@@ -350,12 +351,11 @@ private fun EkloseApp(openHomeRequest: Long = 0L) {
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val useNavigationRail = maxWidth >= EkloseLayoutBreakpoints.Expanded
         val navigationBarInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-        val snackbarBottomPadding = if (!useNavigationRail && floatingNavigationBar) {
-            104.dp + navigationBarInset
-        } else {
-            20.dp
-        }
-        val scrollBehavior = MiuixScrollBehavior()
+        val scrollBehavior = MiuixScrollBehavior(
+            // 顶栏状态不跨进程保存：冷启动若恢复上次折叠的 heightOffset，
+            // 大标题栏会在首帧后展开，主页激活卡片就被"顶"得瞬移。
+            state = remember { TopAppBarState(-Float.MAX_VALUE, 0f, 0f) },
+        )
         val blurBackdrop = rememberEkloseBlurBackdrop()
         val floatingGlassActive = floatingNavigationBarGlass && isRenderEffectSupported()
         val floatingSurfaceColor = MiuixTheme.colorScheme.surface
@@ -491,7 +491,9 @@ private fun EkloseApp(openHomeRequest: Long = 0L) {
         snackbarHost = {
             EkloseSnackbarHost(
                 state = snackbarHostState,
-                bottomPadding = snackbarBottomPadding,
+                // 悬浮底栏模式下 Scaffold 的 bottomBar 已把 snackbar 抬到栏上方，
+                // 不能再叠加内边距，否则 toast 悬在半空不贴底。
+                bottomPadding = if (!useNavigationRail && floatingNavigationBar) 0.dp else null,
             )
         },
         bottomBar = {
@@ -631,6 +633,9 @@ private fun EkloseApp(openHomeRequest: Long = 0L) {
                         remoteStatus = remoteStatus,
                         bottomInnerPadding = bottomInnerPadding,
                         onShowAbout = { showAboutDialog = true },
+                        onLogoutHint = {
+                            scope.launch { snackbarHostState.showSnackbar("再点一次退出登录") }
+                        },
                     )
                     RootPage.Reader -> ReaderPage(
                         homeworkScope = selectedHomeworkScope,
@@ -845,6 +850,7 @@ private fun HomePage(
     remoteStatus: EkloseRemoteStatus?,
     bottomInnerPadding: androidx.compose.ui.unit.Dp,
     onShowAbout: () -> Unit,
+    onLogoutHint: () -> Unit,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -889,6 +895,13 @@ private fun HomePage(
                 onActivate = {
                     context.startActivity(Intent(context, LoginActivity::class.java))
                 },
+                onLogoutHint = onLogoutHint,
+                onLogout = {
+                    EkwingAnswerPrefetchManager.cancelAll()
+                    EkwingLoginStore.clearSession(context)
+                    EkwingAnswerCacheStore.clear(context)
+                    loginSession = null
+                },
             )
         }
         item {
@@ -930,6 +943,8 @@ private fun EkloseActivationStatusCard(
     session: EkwingLoginSession?,
     identityName: String?,
     onActivate: () -> Unit,
+    onLogoutHint: () -> Unit = {},
+    onLogout: () -> Unit = {},
 ) {
     val isDarkTheme = LocalEkloseIsDarkTheme.current
     val isDynamicColor = MiuixTheme.isDynamicColor
@@ -977,6 +992,7 @@ private fun EkloseActivationStatusCard(
             } else {
                 Color(0xFF36D167)
             }
+            var lastTapAt by remember { mutableStateOf(0L) }
 
             Row(
                 modifier = Modifier
@@ -990,6 +1006,15 @@ private fun EkloseActivationStatusCard(
                         color = cardColor,
                         contentColor = contentColor,
                     ),
+                    onClick = {
+                        val now = System.currentTimeMillis()
+                        if (now - lastTapAt < 2_000L) {
+                            onLogout()
+                        } else {
+                            lastTapAt = now
+                            onLogoutHint()
+                        }
+                    },
                     showIndication = false,
                     pressFeedbackType = PressFeedbackType.Tilt,
                 ) {

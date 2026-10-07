@@ -13,9 +13,12 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.padding
@@ -189,11 +192,14 @@ fun RowScope.EkloseFloatingBottomBarItem(
 @Composable
 fun EkloseSnackbarHost(
     state: SnackbarHostState,
-    bottomPadding: Dp = 20.dp,
+    bottomPadding: Dp? = null,
 ) {
+    // miuix Scaffold 会把 snackbar 抬到 bottomBar（悬浮底栏）上方，这里默认只补
+    // 导航栏避让；悬浮底栏场景传 0.dp，避免双重抬升导致 toast 悬在半空。
+    val navigationBarPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     SnackbarHost(
         state = state,
-        modifier = Modifier.padding(bottom = bottomPadding),
+        modifier = Modifier.padding(bottom = bottomPadding ?: navigationBarPadding),
     )
 }
 
