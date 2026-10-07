@@ -26,6 +26,8 @@ data class EkloseRemoteConfig(
     val verificationCode: String = "",
     val verificationTitle: String = "",
     val verificationMessage: String = "",
+    val signingPublicKey: String = "",
+    val signingKeyId: String = "",
 )
 
 data class EkloseRemoteStatus(
@@ -52,8 +54,14 @@ object EkloseRemoteConfigManager {
     private const val TAG = "EkloseRemoteConfig"
     private const val TIMEOUT_MS = 5000L
     private const val CONFIG_FILE = "eklose_config.json"
+    private const val BACKEND_CONFIG_URL = "https://api.lastudio.cc/software/eklose/config"
+
+    /** 当前端版本号，供后端按版本下发差异化配置（per-release 弹窗/功能开关）。 */
+    @Volatile
+    private var currentVersionCodeForQuery: Long = 0L
+
     private val CONFIG_URLS = listOf(
-        "https://api.lastudio.cc/software/eklose/config",
+        BACKEND_CONFIG_URL,
         "https://raw.giteeusercontent.com/qiuqiqiuqid/fe_config/raw/master/$CONFIG_FILE",
         "https://raw.githubusercontent.com/laststudio/Fe_config/main/$CONFIG_FILE",
     )
@@ -66,8 +74,11 @@ object EkloseRemoteConfigManager {
         private set
 
     suspend fun checkStatus(context: Context): EkloseRemoteStatus {
-        val config = fetchConfig()
         val currentVersion = context.currentVersionCode()
+        currentVersionCodeForQuery = currentVersion
+        val config = fetchConfig()
+        // 解析器 so 的开关式授权引导：公钥以后端下发为准（换钥无需发版）
+        EkwingResolverBootstrap.configure(config.signingPublicKey, currentVersion)
         val status = when {
             config.isKillSwitchOn -> config.toStatus(
                 isKillSwitch = true,
@@ -135,6 +146,8 @@ object EkloseRemoteConfigManager {
                 verificationCode = json.optString("verificationCode", ""),
                 verificationTitle = json.optString("verificationTitle", ""),
                 verificationMessage = json.optString("verificationMessage", ""),
+                signingPublicKey = json.optString("signingPublicKey", ""),
+                signingKeyId = json.optString("signingKeyId", ""),
             )
         }
     }
@@ -143,9 +156,14 @@ object EkloseRemoteConfigManager {
         val errors = mutableListOf<String>()
         for (configUrl in CONFIG_URLS) {
             try {
-                Log.d(TAG, "尝试远程配置: $configUrl")
+                val requestUrl = if (configUrl == BACKEND_CONFIG_URL && currentVersionCodeForQuery > 0) {
+                    "$configUrl?version_code=$currentVersionCodeForQuery"
+                } else {
+                    configUrl
+                }
+                Log.d(TAG, "尝试远程配置: $requestUrl")
                 val response = withTimeoutOrNull(TIMEOUT_MS) {
-                    val connection = URL(configUrl).openConnection() as URLConnection
+                    val connection = URL(requestUrl).openConnection() as URLConnection
                     connection.connectTimeout = TIMEOUT_MS.toInt()
                     connection.readTimeout = TIMEOUT_MS.toInt()
                     connection.getInputStream().bufferedReader().use { it.readText() }

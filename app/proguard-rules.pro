@@ -11,6 +11,9 @@
     *;
 }
 
+# libekwing_resolver.so 的 JNI 绑定：JNI_OnLoad 动态注册按类名查找，不可混淆改名
+-keep class com.shauiqiu.eklose.EkwingResolverNative { *; }
+
 # Aggressive R8 / ProGuard Optimization & Obfuscation
 -optimizationpasses 5
 -overloadaggressively
