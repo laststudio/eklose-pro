@@ -1387,20 +1387,6 @@ private fun ReaderPage(
                         )
                     }
                 }
-                readerSummary?.let { summary ->
-                    item(key = "reader_status") {
-                        Text(
-                            text = summary,
-                            modifier = Modifier.padding(horizontal = 4.dp),
-                            style = MiuixTheme.textStyles.body2,
-                            color = if (summary.startsWith("读取失败")) {
-                                MiuixTheme.colorScheme.error
-                            } else {
-                                MiuixTheme.colorScheme.onSurfaceVariantSummary
-                            },
-                        )
-                    }
-                }
                 item {
                     GroupSection(title = "${homeworkScope.listName}列表") {
                         papers.forEachIndexed { index, paper ->
