@@ -7,7 +7,7 @@
   "announcementUpdatedAt": "2026-06-11",
   "announcementUrl": "",
   "changelogTitle": "更新日志",
-  "changelogSummary": "新增远程管理、更新提醒和公告入口；公告与更新页已改为独立页面展示。",
+  "changelogSummary": "答案解析内置 Rust 解析库、新增云端模式开关；修复解析停用后的转圈与缓存绕过。",
   "verificationCode": "eklose666",
   "verificationTitle": "防倒卖验证",
   "verificationMessage": "本软件完全免费,为防止倒卖,请加入群聊1102410958获取验证码"
