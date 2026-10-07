@@ -174,7 +174,10 @@ private fun loadingAnswerSections(source: EkwingAnswerSource) = listOf(
 )
 
 private fun EkwingAnswerSource.contentName(): String {
-    return if (isHomework) "作业" else "考试"
+    return when (this) {
+        EkwingAnswerSource.StudyCenter -> "任务"
+        else -> if (isHomework) "作业" else "考试"
+    }
 }
 
 private fun List<EkwingAnswerSection>.toUiAnswerSections(): List<AnswerSection> {

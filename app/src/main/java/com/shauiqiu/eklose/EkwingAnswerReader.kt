@@ -45,6 +45,9 @@ private const val HW_HISTORY_SCORE_PATH = "/student/Hw/jshistoryitemScore"
 private const val HW_RESULT_PATH = "/student/Hw/GetHwResult"
 private const val TRAIN_ITEM_ANSWER_PATH = "/student/train/getitemans"
 private const val TRAIN_JS_ITEM_ANSWER_PATH = "/student/train/getjsitemans"
+private const val TRAIN_ITEMS_PATH = "/student/train/getstudetail"
+private const val BASIC_TRAIN_ITEMS_PATH = "/student/train/getbasicstudetail"
+private const val TRAIN_HISTORY_SCORE_PATH = "/student/train/gethistoryscore"
 private const val EXAM_HISTORY_PATH = "/student/exam/getstuexamlist"
 private const val BASIC_EXAM_HISTORY_PATH = "/student/exam/getstubasicexamlist"
 private const val EXAM_ITEM_PATH = "/student/exam/getstuexamitem"
@@ -93,7 +96,8 @@ enum class EkwingAnswerSource(
     Current("current"),
     History("history"),
     HomeworkCurrent("homework_current"),
-    HomeworkHistory("homework_history");
+    HomeworkHistory("homework_history"),
+    StudyCenter("study_center");
 
     val isHomework: Boolean
         get() = this == HomeworkCurrent || this == HomeworkHistory
@@ -516,33 +520,44 @@ private fun JSONObject?.toStringMap(): Map<String, String> {
 }
 
 class EkwingAnswerReader(private val context: Context) {
+    companion object {
+        // 分页硬上限：totalPage 异常或游标失效时保证读取必然结束并给出结果。
+        private const val MAX_LIST_PAGES = 20
+    }
+
     fun readPapers(source: EkwingAnswerSource): List<EkwingAnswerPaper> {
         val history = source.isHistory
         val isHomework = source.isHomework
         val session = EkwingLoginStore.loadSession(context)
             ?: throw RuntimeException("请先登录翼课账号")
 
-        val useBasic = EkwingLoginStore.useBasicApi(context)
-        val taskList = if (isHomework) {
-            getHomeworkList(
+        val useBasic = resolveUseBasic(session)
+        val taskList = when {
+            source == EkwingAnswerSource.StudyCenter -> getStudyCenterTaskList(session, useBasic)
+            isHomework -> getHomeworkList(
                 session = session,
                 useBasic = useBasic,
                 history = history,
-                allPages = EkwingLoginStore.loadAllPages(context),
             )
-        } else {
-            getExamList(
+            else -> getExamList(
                 session = session,
                 useBasic = useBasic,
                 history = history,
-                allPages = EkwingLoginStore.loadAllPages(context),
             )
         }
         val allItems = taskList.tasks.distinctBy {
-            if (isHomework) it.homeworkAnswerPaperKey() else it.answerPaperKey()
+            when {
+                source == EkwingAnswerSource.StudyCenter -> it.studyCenterTaskPaperKey()
+                isHomework -> it.homeworkAnswerPaperKey()
+                else -> it.answerPaperKey()
+            }
         }
         val papers = allItems.mapIndexed { index, task ->
-            if (isHomework) task.toHomeworkAnswerPaper(index) else task.toAnswerPaper(index)
+            when {
+                source == EkwingAnswerSource.StudyCenter -> task.toStudyCenterTaskPaper(index)
+                isHomework -> task.toHomeworkAnswerPaper(index)
+                else -> task.toAnswerPaper(index)
+            }
         }
 
         val oldState = EkwingAnswerState.sourceState(source)
@@ -614,12 +629,19 @@ class EkwingAnswerReader(private val context: Context) {
             .getOrElse { throw RuntimeException("任务缓存无效，请重新读取列表") }
         val session = EkwingLoginStore.loadSession(context)
             ?: throw RuntimeException("请先登录翼课账号")
-        val useBasic = EkwingLoginStore.useBasicApi(context)
+        val useBasic = resolveUseBasic(session)
         val sections = ekwingReadAttempt {
-            if (source.isHomework) {
-                readHomeworkSections(session, task, useBasic, source = source, paperKey = paperKey)
-            } else {
-                readExamSections(session, task, useBasic, source = source, paperKey = paperKey)
+            when {
+                source.isHomework -> readHomeworkSections(session, task, useBasic, source = source, paperKey = paperKey)
+                source == EkwingAnswerSource.StudyCenter -> readHomeworkSections(
+                    session = session,
+                    homework = task,
+                    useBasic = useBasic,
+                    source = source,
+                    paperKey = paperKey,
+                    train = task.optString("type").trim().equals("train", ignoreCase = true),
+                )
+                else -> readExamSections(session, task, useBasic, source = source, paperKey = paperKey)
             }
         }.getOrElse { error ->
             listOf(EkwingAnswerAssembler.readFailureSection(error))
@@ -642,13 +664,52 @@ class EkwingAnswerReader(private val context: Context) {
         return sections
     }
 
+    // 官方判定（逆向 UserInfoManager.isBasic）：vip_status 为假且 student_user_type == 2，
+    // 数据来自 /student/user/getuserinfoall；首次读取时判定一次并持久化，不再依赖端点回退猜测。
+    private fun resolveUseBasic(session: EkwingLoginSession): Boolean {
+        if (!EkwingLoginStore.hasUserBasic(context)) {
+            ekwingReadAttempt {
+                val info = EkwingAuthClient(context).fetchUserInfoAll(session.uid, session.token)
+                EkwingLoginStore.rememberUserBasic(context, !info.vipStatus && info.studentUserType == 2)
+            }
+        }
+        return EkwingLoginStore.preferBasicApi(context, session.userType)
+    }
+
+    // 成功的那条路径即该账号实际可用的接口类型，据此记住 Basic 偏好，后续请求直接命中。
+    // 部分端点对错误账号类型返回 status=0 的空列表而非报错（软失败），
+    // 因此首个"非空成功"才算数：空结果继续尝试备用路径，避免把空列表当读取成功。
+    private fun <T> requestWithBasicLearning(
+        paths: List<String>,
+        request: (String) -> T,
+        isEmptyResult: (T) -> Boolean = { false },
+    ): T {
+        var lastError: Throwable? = null
+        var fallback: Pair<String, T>? = null
+        paths.distinct().forEach { path ->
+            ekwingReadAttempt { request(path) }
+                .onSuccess { result ->
+                    if (fallback == null) fallback = path to result
+                    if (!isEmptyResult(result)) {
+                        EkwingLoginStore.rememberBasicApi(context, path.contains("basic", ignoreCase = true))
+                        return result
+                    }
+                }
+                .onFailure { lastError = it }
+        }
+        fallback?.let { (path, result) ->
+            EkwingLoginStore.rememberBasicApi(context, path.contains("basic", ignoreCase = true))
+            return result
+        }
+        throw lastError ?: RuntimeException("没有可用接口")
+    }
+
     private fun getHomeworkList(
         session: EkwingLoginSession,
         useBasic: Boolean,
         history: Boolean,
-        allPages: Boolean,
     ): EkwingTaskList {
-        val data = getHomeworkListData(session, useBasic, history, allPages)
+        val data = getHomeworkListData(session, useBasic, history)
         return EkwingTaskList(session, EkwingTaskListParser.homeworkListTasks(data))
     }
 
@@ -656,11 +717,10 @@ class EkwingAnswerReader(private val context: Context) {
         session: EkwingLoginSession,
         useBasic: Boolean,
         history: Boolean,
-        allPages: Boolean,
     ): Any? {
         val paths = EkwingHomeworkApiPlanner.homeworkListPaths(useBasic)
         fun requestPage(page: Int, archiveId: String? = null): Any? {
-            return requestFirstSuccessful(paths) { path ->
+            return requestWithBasicLearning(paths, request = { path ->
                 val request = EkwingHomeworkRequestPlanner.homeworkListRequest(
                     history = history,
                     page = page,
@@ -668,21 +728,30 @@ class EkwingAnswerReader(private val context: Context) {
                     commonParams = commonParams(session),
                 )
                 postForm(path, request.payload).opt("data")
-            }
+            })
         }
 
-        val firstPage = requestPage(1)
-        if (!allPages) return firstPage
-
+        // 首页要用"非空才算成功"挑选账号类型；续页空结果是正常的，走普通请求。
+        val firstPage = requestWithBasicLearning(paths, request = { path ->
+            val request = EkwingHomeworkRequestPlanner.homeworkListRequest(
+                history = history,
+                page = 1,
+                commonParams = commonParams(session),
+            )
+            postForm(path, request.payload).opt("data")
+        }, isEmptyResult = { EkwingTaskListParser.homeworkListTasks(it).isEmpty() })
         val items = EkwingTaskListParser.homeworkListTasks(firstPage).toMutableList()
         val pageInfo = EkwingHomeworkDetailParser.pageInfo(firstPage)
         var current = pageInfo?.optInt("currentPage", 1) ?: 1
         val total = pageInfo?.optInt("totalPage", current) ?: current
-        while (current < total && items.isNotEmpty()) {
+        while (current < total && items.isNotEmpty() && current <= MAX_LIST_PAGES) {
             val archiveId = lastArchiveId(items)
             current += 1
             val nextItems = EkwingTaskListParser.homeworkListTasks(requestPage(current, archiveId))
             if (nextItems.isEmpty()) break
+            // 服务端游标无进展（返回同一页）时终止，防止读取卡死表现为"无反应"。
+            val nextArchiveId = lastArchiveId(nextItems)
+            if (nextArchiveId != null && nextArchiveId == archiveId) break
             items += nextItems
         }
         return JSONArray().apply { items.forEach(::put) }
@@ -692,9 +761,8 @@ class EkwingAnswerReader(private val context: Context) {
         session: EkwingLoginSession,
         useBasic: Boolean,
         history: Boolean,
-        allPages: Boolean,
     ): EkwingTaskList {
-        val data = getExamListData(session, useBasic, history, allPages)
+        val data = getExamListData(session = session, useBasic = useBasic, history = history)
         return EkwingTaskList(
             session = session,
             tasks = if (history) {
@@ -709,46 +777,69 @@ class EkwingAnswerReader(private val context: Context) {
         session: EkwingLoginSession,
         useBasic: Boolean,
         history: Boolean,
-        allPages: Boolean,
     ): Any? {
         if (!history) {
-            return requestFirstSuccessful(EkwingHomeworkApiPlanner.studyCenterPaths(useBasic)) { path ->
-                postForm(path, commonParams(session)).opt("data")
-            }
+            return requestWithBasicLearning(
+                EkwingHomeworkApiPlanner.studyCenterPaths(useBasic),
+                request = { path ->
+                    postForm(path, commonParams(session)).opt("data")
+                },
+                isEmptyResult = { EkwingTaskListParser.studyCenterExamTasks(it).isEmpty() },
+            )
         }
 
         val paths = EkwingHomeworkApiPlanner.examHistoryPaths(useBasic)
-        val firstPage = requestFirstSuccessful(paths) { path ->
-            val request = EkwingHomeworkRequestPlanner.examHistoryRequest(
-                page = 1,
-                commonParams = commonParams(session),
-            )
-            postForm(path, request.payload).opt("data")
-        }
-        if (!allPages) return firstPage
+        val firstPage = requestWithBasicLearning(
+            paths,
+            request = { path ->
+                val request = EkwingHomeworkRequestPlanner.examHistoryRequest(
+                    page = 1,
+                    commonParams = commonParams(session),
+                )
+                postForm(path, request.payload).opt("data")
+            },
+            isEmptyResult = { EkwingTaskListParser.examHistoryTasks(it).isEmpty() },
+        )
 
         val items = EkwingTaskListParser.examHistoryTasks(firstPage).toMutableList()
         val pageInfo = EkwingHomeworkDetailParser.pageInfo(firstPage)
         var current = pageInfo?.optInt("currentPage", 1) ?: 1
         val total = pageInfo?.optInt("totalPage", current) ?: current
-        while (current < total && items.isNotEmpty()) {
+        while (current < total && items.isNotEmpty() && current <= MAX_LIST_PAGES) {
             val archiveId = lastArchiveId(items)
             current += 1
-            val pageData = requestFirstSuccessful(paths) { path ->
+            val pageData = requestWithBasicLearning(paths, request = { path ->
                 val request = EkwingHomeworkRequestPlanner.examHistoryRequest(
                     page = current,
                     archiveId = archiveId,
                     commonParams = commonParams(session),
                 )
                 postForm(path, request.payload).opt("data")
-            }
+            })
             val nextItems = EkwingTaskListParser.examHistoryTasks(pageData)
             if (nextItems.isEmpty()) break
+            // 服务端游标无进展（返回同一页）时终止，防止读取卡死表现为"无反应"。
+            val nextArchiveId = lastArchiveId(nextItems)
+            if (nextArchiveId != null && nextArchiveId == archiveId) break
             items += nextItems
         }
         return JSONArray().apply {
             items.forEach(::put)
         }
+    }
+
+    private fun getStudyCenterTaskList(
+        session: EkwingLoginSession,
+        useBasic: Boolean,
+    ): EkwingTaskList {
+        val data = requestWithBasicLearning(
+            EkwingHomeworkApiPlanner.studyCenterPaths(useBasic),
+            request = { path ->
+                postForm(path, commonParams(session)).opt("data")
+            },
+            isEmptyResult = { EkwingTaskListParser.studyCenterTaskCards(it).isEmpty() },
+        )
+        return EkwingTaskList(session, EkwingTaskListParser.studyCenterTaskCards(data))
     }
 
     private fun readHomeworkSections(
@@ -757,17 +848,18 @@ class EkwingAnswerReader(private val context: Context) {
         useBasic: Boolean,
         source: EkwingAnswerSource = EkwingAnswerSource.HomeworkCurrent,
         paperKey: String? = null,
+        train: Boolean = false,
     ): List<EkwingAnswerSection> {
-        if (isExamPayload(homework)) {
+        if (!train && isExamPayload(homework)) {
             return readExamSections(session, homework, useBasic, source = source, paperKey = paperKey)
         }
-        val detailItems = getDetailItems(session, homework, useBasic)
+        val detailItems = getDetailItems(session, homework, useBasic, train)
         if (detailItems.isEmpty()) {
             return listOf(
                 EkwingAnswerSection(
                     title = "答案",
                     category = "empty",
-                    originalText = "未读取到作业小项",
+                    originalText = if (train) "未读取到训练小项" else "未读取到作业小项",
                     questions = emptyList(),
                 )
             )
@@ -782,9 +874,16 @@ class EkwingAnswerReader(private val context: Context) {
                     return@flatMapIndexed examSections
                 }
             }
-            val contentQuestions = fetchContentQuestions(session, homework, item)
+            val contentQuestions = if (train) {
+                // 训练任务没有 hwdoitem 对应接口，小项内容直接用自带的 url 读取。
+                ekwingReadAttempt { fetchItemUrlData(session, item) }
+                    .map { parseContentQuestions(it) }
+                    .getOrDefault(emptyList())
+            } else {
+                fetchContentQuestions(session, homework, item)
+            }
             val itemAnswers = parseAnswerQuestions(item)
-            val fetchedAnswers = fetchAnswers(session, homework, item)
+            val fetchedAnswers = fetchAnswers(session, homework, item, train)
             val answers = mergeAnswerSources(itemAnswers, fetchedAnswers)
             val questions = mergeQuestions(contentQuestions, answers)
             val title = firstNonBlank(
@@ -899,8 +998,17 @@ class EkwingAnswerReader(private val context: Context) {
         )
     }
 
-    private fun getDetailItems(session: EkwingLoginSession, homework: JSONObject, useBasic: Boolean): List<JSONObject> {
-        val paths = EkwingHomeworkApiPlanner.detailPaths(useBasic)
+    private fun getDetailItems(
+        session: EkwingLoginSession,
+        homework: JSONObject,
+        useBasic: Boolean,
+        train: Boolean = false,
+    ): List<JSONObject> {
+        val paths = if (train) {
+            EkwingHomeworkApiPlanner.trainDetailPaths(useBasic)
+        } else {
+            EkwingHomeworkApiPlanner.detailPaths(useBasic)
+        }
         var lastError: Throwable? = null
         val mergedItems = linkedMapOf<String, JSONObject>()
         paths.forEach { path ->
@@ -1012,12 +1120,14 @@ class EkwingAnswerReader(private val context: Context) {
         session: EkwingLoginSession,
         homework: JSONObject,
         item: JSONObject,
+        train: Boolean = false,
     ): List<EkwingAnswerQuestion> {
         val records = linkedMapOf<String, EkwingAnswerQuestion>()
         EkwingHomeworkRequestPlanner.answerRequests(
             homework = homework,
             item = item,
             commonParams = commonParams(session),
+            train = train,
         ).forEach { request ->
             ekwingReadAttempt {
                 postForm(request.path, request.payload).opt("data")
@@ -1345,6 +1455,12 @@ internal object EkwingTaskListParser {
     fun studyCenterExamTasks(value: Any?): List<JSONObject> {
         return extractList(value)
             .filter { it.optString("type").trim().equals("exam", ignoreCase = true) }
+    }
+
+    /** 学习中心混合列表里的作业/训练卡片；考试卡片归 Current/History 数据源。 */
+    fun studyCenterTaskCards(value: Any?): List<JSONObject> {
+        return extractList(value)
+            .filter { it.optString("type").trim().lowercase() in setOf("hw", "train") }
     }
 
     fun examHistoryTasks(value: Any?): List<JSONObject> {
@@ -2547,6 +2663,15 @@ internal object EkwingHomeworkApiPlanner {
         )
     }
 
+    /** 训练卡片的小项来源：train/getstudetail（Basic 分支）+ train/gethistoryscore 兜底。 */
+    fun trainDetailPaths(useBasic: Boolean): List<String> {
+        return preferBasicPath(
+            useBasic = useBasic,
+            normal = TRAIN_ITEMS_PATH,
+            basic = BASIC_TRAIN_ITEMS_PATH,
+        ) + TRAIN_HISTORY_SCORE_PATH
+    }
+
     private fun preferBasicPath(useBasic: Boolean, normal: String, basic: String): List<String> {
         return if (useBasic) listOf(basic, normal) else listOf(normal, basic)
     }
@@ -2669,9 +2794,11 @@ internal object EkwingHomeworkRequestPlanner {
         homework: JSONObject,
         item: JSONObject,
         commonParams: Map<String, String>,
+        train: Boolean = false,
     ): List<EkwingScoreRequest> {
         val requests = mutableListOf<EkwingScoreRequest>()
-        if (homeworkItemContentId(item) != null) {
+        // 训练任务没有 gethwcnt/GetHwResult 对应实现，答案只走 train 端点。
+        if (!train && homeworkItemContentId(item) != null) {
             requests += itemRequest(
                 path = HW_ANSWER_PATH,
                 homework = homework,
@@ -2757,10 +2884,14 @@ internal object EkwingHomeworkRequestPlanner {
         val type = item.optString("type").takeIf { it.isNotBlank() } ?: return null
         val recordId = item.optString("record_id").takeIf { it.isNotBlank() } ?: return null
         val payload = commonParams.toMutableMap()
+        // 最新 demo 证据（HWSubmitResultActivity.y()）：训练答案与 getHwAns 共用同一个 map，
+        // 即 hid/hwcid/method/archiveId 之上再补 unit_id/type/record_id 三个字段。
+        payload["hid"] = homeworkItemHid(homework, item).orEmpty()
+        payload["hwcid"] = homeworkItemContentId(item).orEmpty()
+        payload["archiveId"] = homework.homeworkArchiveId()
         payload["unit_id"] = unitId
         payload["type"] = type
         payload["record_id"] = recordId
-        payload["archiveId"] = homework.homeworkArchiveId()
         payload.putAll(extra)
         return EkwingScoreRequest(path = path, payload = payload)
     }
@@ -2991,6 +3122,46 @@ internal fun JSONObject.toHomeworkAnswerPaper(index: Int): EkwingAnswerPaper {
         title = title,
         summary = summaryParts.joinToString(" | ").ifBlank { "常规作业" },
     )
+}
+
+internal fun JSONObject.toStudyCenterTaskPaper(index: Int): EkwingAnswerPaper {
+    val isTrain = optString("type").trim().equals("train", ignoreCase = true)
+    val kindLabel = if (isTrain) "学习中心训练" else "学习中心作业"
+    val title = firstNonBlank(optString("title"), optString("book_name"), "$kindLabel ${index + 1}")
+        ?: kindLabel
+    val total = firstNonBlank(optString("total_num"), optString("cntTotal"))
+    val finished = firstNonBlank(optString("finish_num"), optString("finishCntNum"))
+    val score = firstNonBlank(optString("score"), optString("self_score"))
+    val status = firstNonBlank(optString("self_status"), optString("status"))
+    val endTime = firstNonBlank(optString("end_time"))
+    val summaryParts = listOfNotNull(
+        kindLabel,
+        total?.let { "$it 题" },
+        when {
+            !finished.isNullOrBlank() && !total.isNullOrBlank() -> "完成 $finished/$total"
+            !finished.isNullOrBlank() -> "完成 $finished"
+            else -> null
+        },
+        score?.let { "分数 $it" },
+        endTime?.let { "截止 $it" },
+        status?.let { "状态 ${homeworkStatusText(it)}" },
+    )
+    return EkwingAnswerPaper(
+        key = studyCenterTaskPaperKey(),
+        title = title,
+        summary = summaryParts.joinToString(" | ").ifBlank { kindLabel },
+    )
+}
+
+private fun JSONObject.studyCenterTaskPaperKey(): String {
+    val type = optString("type").takeIf { it.isNotBlank() } ?: "task"
+    val id = firstNonBlank(
+        optString("id"),
+        optString("hid"),
+        optString("record_id"),
+        optString("title"),
+    ) ?: toString()
+    return "$type:$id"
 }
 
 internal fun examStatusText(status: String): String {

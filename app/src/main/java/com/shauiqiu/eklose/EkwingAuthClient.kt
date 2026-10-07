@@ -18,7 +18,7 @@ private const val BASE_URL = "https://mapi.ekwing.com"
 private const val LOGIN_SCHOOL_PATH = "/student/User/loginschool"
 private const val LOGIN_ACCOUNT_PATH = "/student/User/login"
 private const val SEARCH_SCHOOL_PATH = "/student/user/searchschool"
-const val COUNTY_SCHOOL_PATH = "/student/user/scgetschool"
+private const val USER_INFO_ALL_PATH = "/student/user/getuserinfoall"
 
 data class EkwingSchool(
     val schoolId: String,
@@ -59,6 +59,11 @@ data class EkwingLoginSession(
     val userType: String?,
 )
 
+data class EkwingUserInfo(
+    val studentUserType: Int,
+    val vipStatus: Boolean,
+)
+
 class EkwingAuthClient(context: Context) {
     private val appContext = context.applicationContext
 
@@ -73,19 +78,35 @@ class EkwingAuthClient(context: Context) {
         return extractList(body.opt("data")).mapNotNull(::normalizeSchool)
     }
 
-    fun getSchoolsByCounty(countyId: String, studySection: String = "0"): List<EkwingSchool> {
-        val payload = commonParams().toMutableMap()
-        payload["id"] = countyId
-        payload["st_id"] = studySection
-        val body = postForm(COUNTY_SCHOOL_PATH, payload)
-        if (body.optInt("status", -1) != 0) {
-            throw RuntimeException(errorMessage(body))
-        }
-        return extractList(body.opt("data")).mapNotNull(::normalizeSchool)
-    }
-
     fun loginByAccount(username: String, password: String): EkwingLoginResult {
         return loginByAccountMd5(username = username, passwordMd5 = md5Hex(password))
+    }
+
+    /**
+     * 拉取完整用户信息。官方 Basic 账号判定（逆向 UserInfoManager.isBasic）：
+     * vip_status 为假且 student_user_type == 2；字段名即 JSON 键。
+     */
+    fun fetchUserInfoAll(uid: String, token: String): EkwingUserInfo {
+        val payload = commonParams().toMutableMap()
+        payload["uid"] = uid
+        payload["author_id"] = uid
+        payload["token"] = token
+        val body = postForm(USER_INFO_ALL_PATH, payload)
+        if (body.optInt("status", -1) != 0) {
+            throw ekwingRequestError(errorMessage(body))
+        }
+        val data = body.optJSONObject("data")
+            ?: throw RuntimeException("用户信息返回缺少 data：$body")
+        val rawVipStatus = data.opt("vip_status")
+        return EkwingUserInfo(
+            studentUserType = data.optInt("student_user_type", -1),
+            vipStatus = when (rawVipStatus) {
+                is Boolean -> rawVipStatus
+                is Number -> rawVipStatus.toInt() != 0
+                is String -> rawVipStatus.equals("true", ignoreCase = true) || rawVipStatus == "1"
+                else -> false
+            },
+        )
     }
 
     fun loginByAccountMd5(username: String, passwordMd5: String): EkwingLoginResult {
@@ -267,8 +288,8 @@ object EkwingLoginStore {
     private const val PREFS_NAME = "ekwing_login"
     private const val KEY_SAVE_LOGIN = "save_login"
     private const val KEY_AUTO_REFRESH_TOKEN = "auto_refresh_token"
-    private const val KEY_BASIC_API = "basic_api"
-    private const val KEY_ALL_PAGES = "all_pages"
+    private const val KEY_BASIC_FROM_USER = "basic_from_user"
+    private const val KEY_BASIC_DETECTED = "basic_api_detected"
     private const val KEY_FLOATING_NAVIGATION_BAR = "floating_navigation_bar"
     private const val KEY_FLOATING_NAVIGATION_BAR_GLASS = "floating_navigation_bar_glass"
     private const val KEY_NAVIGATION_RAIL_EXPANDED = "navigation_rail_expanded"
@@ -290,12 +311,17 @@ object EkwingLoginStore {
     ) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val shouldSaveLogin = prefs.getBoolean(KEY_SAVE_LOGIN, true)
+        val accountChanged = prefs.getString("uid", null) != result.uid
         prefs.edit()
             .putString("uid", result.uid)
             .putString("token", result.token)
             .putString("userType", result.userType)
             .putString("login_method", loginMethod)
             .apply {
+                if (accountChanged) {
+                    remove(KEY_BASIC_FROM_USER)
+                    remove(KEY_BASIC_DETECTED)
+                }
                 if (shouldSaveLogin) {
                     putString("password", identity.password)
                     when (loginMethod) {
@@ -347,6 +373,8 @@ object EkwingLoginStore {
             .remove("token")
             .remove("userType")
             .remove("login_method")
+            .remove(KEY_BASIC_FROM_USER)
+            .remove(KEY_BASIC_DETECTED)
             .remove("username")
             .remove("name")
             .remove("school_name")
@@ -387,27 +415,35 @@ object EkwingLoginStore {
         editor.apply()
     }
 
-    fun useBasicApi(context: Context): Boolean {
-        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .getBoolean(KEY_BASIC_API, false)
+    fun preferBasicApi(context: Context, userType: String? = null): Boolean {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        if (prefs.contains(KEY_BASIC_FROM_USER)) {
+            // getuserinfoall 判定的账号类型是权威值，优先于请求路径学习结果。
+            return prefs.getBoolean(KEY_BASIC_FROM_USER, false)
+        }
+        if (prefs.contains(KEY_BASIC_DETECTED)) {
+            return prefs.getBoolean(KEY_BASIC_DETECTED, false)
+        }
+        // userType 字符串仅作兜底提示。
+        return userType?.contains("basic", ignoreCase = true) == true
     }
 
-    fun setUseBasicApi(context: Context, enabled: Boolean) {
+    fun hasUserBasic(context: Context): Boolean {
+        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .contains(KEY_BASIC_FROM_USER)
+    }
+
+    fun rememberUserBasic(context: Context, basic: Boolean) {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
-            .putBoolean(KEY_BASIC_API, enabled)
+            .putBoolean(KEY_BASIC_FROM_USER, basic)
             .apply()
     }
 
-    fun loadAllPages(context: Context): Boolean {
-        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .getBoolean(KEY_ALL_PAGES, true)
-    }
-
-    fun setLoadAllPages(context: Context, enabled: Boolean) {
+    fun rememberBasicApi(context: Context, basic: Boolean) {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
-            .putBoolean(KEY_ALL_PAGES, enabled)
+            .putBoolean(KEY_BASIC_DETECTED, basic)
             .apply()
     }
 

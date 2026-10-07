@@ -94,6 +94,7 @@ import com.shauiqiu.eklose.ui.theme.rememberEkloseNavigationBadgeEnabled
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -129,6 +130,7 @@ import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.basic.Check
 import top.yukonga.miuix.kmp.icon.basic.Search
 import top.yukonga.miuix.kmp.icon.extended.Settings
+import top.yukonga.miuix.kmp.icon.extended.Delete
 import top.yukonga.miuix.kmp.icon.extended.MoreCircle
 import top.yukonga.miuix.kmp.menu.OverlayIconDropdownMenu
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
@@ -229,6 +231,13 @@ private enum class HomeworkScope(
         contentName = "作业",
         listName = "作业",
     ),
+    StudyCenterTasks(
+        label = "学习中心作业/训练",
+        readerSummary = "读取学习中心的作业和训练任务，进入任务后再读取答案",
+        answerSource = EkwingAnswerSource.StudyCenter,
+        contentName = "任务",
+        listName = "任务",
+    ),
 }
 
 private data class RemoteDialogState(
@@ -246,6 +255,7 @@ private fun EkloseApp(openHomeRequest: Long = 0L) {
     var selectedHomeworkScopeIndex by rememberSaveable { mutableStateOf(0) }
     var readerSummary by rememberSaveable { mutableStateOf<String?>(null) }
     var readingSources by remember { mutableStateOf(emptySet<EkwingAnswerSource>()) }
+    var readJob by remember { mutableStateOf<Job?>(null) }
     var remoteStatus by remember { mutableStateOf(EkloseApplication.remoteStatus ?: EkloseRemoteConfigManager.cachedStatus) }
     var remoteDialog by remember { mutableStateOf<RemoteDialogState?>(null) }
     var showVerificationDialog by rememberSaveable { mutableStateOf(false) }
@@ -276,7 +286,8 @@ private fun EkloseApp(openHomeRequest: Long = 0L) {
     val selectedSourceState = answerStates[selectedHomeworkScope.answerSource] ?: EkwingAnswerSourceState()
     val snackbarHostState = remember { SnackbarHostState() }
     val navigationBadgeEnabled = rememberEkloseNavigationBadgeEnabled()
-    // Count only the selected reading source, not all sources or in-flight operations.
+    // Count only the reader's selected content source; never combine current/history,
+    // homework/exams, or the number of concurrently running read operations.
     val selectedPaperCount = selectedSourceState.papers.size
     val readingBadge: (@Composable () -> Unit)? = if (navigationBadgeEnabled && selectedPaperCount > 0) {
         {
@@ -367,19 +378,27 @@ private fun EkloseApp(openHomeRequest: Long = 0L) {
         }
 
         fun readSelectedHomework() {
-            val requestedScope = selectedHomeworkScope
+            // 执行时实时读当前作用域，不捕获组合期缓存的 val：
+            // 切换作用域后旧闭包（下拉/菜单持有的旧回调）可能晚一拍才更新，
+            // 用缓存值会读成上一个作用域（表现为"当前/历史"互换）。
+            val requestedScope = HomeworkScope.entries[selectedHomeworkScopeIndex]
             val requestedSource = requestedScope.answerSource
-            if (requestedSource in readingSources) return
+            if (requestedSource in readingSources) {
+                scope.launch { snackbarHostState.showSnackbar("正在读取${requestedScope.label}，请稍候") }
+                return
+            }
             EkwingTokenRefreshManager.beginUserRead()
             readingSources += requestedSource
             readerSummary = "正在读取${requestedScope.label}..."
-            scope.launch {
+            readJob = scope.launch {
                 val message = try {
                     val result = EkwingTokenRefreshManager.withTokenRefresh(context) {
                         EkwingAnswerReader(context).readPapers(source = requestedSource)
                     }
                     "已加载 ${result.size} 份${requestedScope.label}，正在后台解析答案"
                 } catch (cancelled: CancellationException) {
+                    // 删除触发的取消：阻塞 IO 里已完成的状态/缓存写入可能落在 clear 之后，再清一次兜底。
+                    EkwingAnswerCacheStore.clear(context)
                     throw cancelled
                 } catch (error: Exception) {
                     "读取失败：${error.message ?: "未知错误"}"
@@ -394,6 +413,8 @@ private fun EkloseApp(openHomeRequest: Long = 0L) {
         }
 
         fun deleteReadResults() {
+            // 先取消进行中的读取，否则读取完成后会把状态/缓存写回，删除看起来像没生效。
+            readJob?.cancel()
             EkwingAnswerPrefetchManager.cancelAll()
             EkwingAnswerCacheStore.clear(context)
             readerSummary = "已清空读取结果"
@@ -420,16 +441,45 @@ private fun EkloseApp(openHomeRequest: Long = 0L) {
                         {
                             val readerActions = DropdownEntry(
                                 items = listOf(
-                                    DropdownItem(text = "读取", onClick = ::readSelectedHomework),
-                                    DropdownItem(text = "删除", onClick = ::deleteReadResults),
+                                    DropdownItem(
+                                        text = "读取",
+                                        onClick = ::readSelectedHomework,
+                                        icon = { modifier ->
+                                            Icon(
+                                                imageVector = MiuixIcons.Basic.Search,
+                                                contentDescription = null,
+                                                modifier = modifier,
+                                                tint = MiuixTheme.colorScheme.onSurfaceContainer,
+                                            )
+                                        },
+                                    ),
+                                    DropdownItem(
+                                        text = "删除",
+                                        onClick = ::deleteReadResults,
+                                        icon = { modifier ->
+                                            Icon(
+                                                imageVector = MiuixIcons.Delete,
+                                                contentDescription = null,
+                                                modifier = modifier,
+                                                tint = MiuixTheme.colorScheme.onSurfaceContainer,
+                                            )
+                                        },
+                                    ),
                                 ),
                             )
                             OverlayIconDropdownMenu(entry = readerActions) {
-                                Icon(
-                                    imageVector = MiuixIcons.MoreCircle,
-                                    contentDescription = "读取操作",
-                                    tint = MiuixTheme.colorScheme.onSurface,
-                                )
+                                if (selectedHomeworkScope.answerSource in readingSources) {
+                                    InfiniteProgressIndicator(
+                                        color = MiuixTheme.colorScheme.onSurface,
+                                        size = 20.dp,
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = MiuixIcons.MoreCircle,
+                                        contentDescription = "读取操作",
+                                        tint = MiuixTheme.colorScheme.onSurface,
+                                    )
+                                }
                             }
                         }
                     } else {
@@ -1312,6 +1362,20 @@ private fun ReaderPage(
                         )
                     }
                 }
+                readerSummary?.let { summary ->
+                    item(key = "reader_status") {
+                        Text(
+                            text = summary,
+                            modifier = Modifier.padding(horizontal = 4.dp),
+                            style = MiuixTheme.textStyles.body2,
+                            color = if (summary.startsWith("读取失败")) {
+                                MiuixTheme.colorScheme.error
+                            } else {
+                                MiuixTheme.colorScheme.onSurfaceVariantSummary
+                            },
+                        )
+                    }
+                }
                 item {
                     GroupSection(title = "${homeworkScope.listName}列表") {
                         papers.forEachIndexed { index, paper ->
@@ -1358,8 +1422,8 @@ private fun ReaderPage(
                                 },
                                 summary = when {
                                     isReading -> "请稍候"
-                                    readFailed -> "点击此处或底部按钮重试：${readerSummary.orEmpty()}"
-                                    else -> "点击右下角读取按钮加载${homeworkScope.contentName}列表"
+                                    readFailed -> "点击此处重试：${readerSummary.orEmpty()}"
+                                    else -> "点击右上角菜单的读取，或下拉刷新加载${homeworkScope.contentName}列表"
                                 },
                                 onRetry = onRead.takeIf { readFailed },
                             )

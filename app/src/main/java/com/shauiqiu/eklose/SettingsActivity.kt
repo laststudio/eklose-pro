@@ -125,8 +125,6 @@ internal fun SettingsScreen(
     var autoRefreshToken by rememberSaveable {
         mutableStateOf(EkwingLoginStore.shouldAutoRefreshToken(context))
     }
-    var basicApi by rememberSaveable { mutableStateOf(EkwingLoginStore.useBasicApi(context)) }
-    var allPages by rememberSaveable { mutableStateOf(EkwingLoginStore.loadAllPages(context)) }
     var floatingNavigationBar by rememberSaveable {
         mutableStateOf(EkwingLoginStore.useFloatingNavigationBar(context))
     }
@@ -208,34 +206,6 @@ internal fun SettingsScreen(
                                 draftAliasFrom = aliasFrom
                                 draftAliasTo = aliasTo
                                 showRealNameAliasDialog = true
-                            },
-                        )
-                        GroupDivider()
-                        GroupItem(
-                            title = "Basic 接口",
-                            summary = "优先使用 Basic 账号对应的列表、详情和成绩接口",
-                            trailing = {
-                                Switch(
-                                    checked = basicApi,
-                                    onCheckedChange = {
-                                        basicApi = it
-                                        EkwingLoginStore.setUseBasicApi(context, it)
-                                    },
-                                )
-                            },
-                        )
-                        GroupDivider()
-                        GroupItem(
-                            title = "历史考试和常规作业全分页",
-                            summary = "读取历史考试和常规作业的所有分页",
-                            trailing = {
-                                Switch(
-                                    checked = allPages,
-                                    onCheckedChange = {
-                                        allPages = it
-                                        EkwingLoginStore.setLoadAllPages(context, it)
-                                    },
-                                )
                             },
                         )
                     }
