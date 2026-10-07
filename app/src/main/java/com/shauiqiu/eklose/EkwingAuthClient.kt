@@ -288,6 +288,7 @@ object EkwingLoginStore {
     private const val PREFS_NAME = "ekwing_login"
     private const val KEY_SAVE_LOGIN = "save_login"
     private const val KEY_AUTO_REFRESH_TOKEN = "auto_refresh_token"
+    private const val KEY_AUTO_PARSE_ALL_ANSWERS = "auto_parse_all_answers"
     private const val KEY_BASIC_FROM_USER = "basic_from_user"
     private const val KEY_BASIC_DETECTED = "basic_api_detected"
     private const val KEY_FLOATING_NAVIGATION_BAR = "floating_navigation_bar"
@@ -398,6 +399,19 @@ object EkwingLoginStore {
             .edit()
             .putBoolean(KEY_AUTO_REFRESH_TOKEN, enabled)
             .apply()
+    }
+
+    fun shouldAutoParseAllAnswers(context: Context): Boolean {
+        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(KEY_AUTO_PARSE_ALL_ANSWERS, false)
+    }
+
+    fun setAutoParseAllAnswers(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_AUTO_PARSE_ALL_ANSWERS, enabled)
+            .apply()
+        if (!enabled) EkwingAnswerPrefetchManager.cancelAutomatic(context)
     }
 
     fun setSaveLogin(context: Context, enabled: Boolean) {

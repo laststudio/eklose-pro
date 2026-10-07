@@ -67,6 +67,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import com.shauiqiu.eklose.ui.theme.EkloseTheme
@@ -74,6 +75,7 @@ import com.shauiqiu.eklose.ui.theme.LocalEkloseCardSurface
 import com.shauiqiu.eklose.ui.theme.LocalEklosePageBackground
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
+import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.DropdownEntry
 import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.Icon
@@ -719,7 +721,6 @@ private fun AnswerSectionBlock(
         EkloseCard(
             modifier = Modifier.fillMaxWidth(),
             cornerRadius = EkloseCornerRadius.Container,
-            color = LocalEklosePageBackground.current,
             contentColor = MiuixTheme.colorScheme.onSurface,
         ) {
             Column(
@@ -860,6 +861,7 @@ private fun AnswerBottomSheet(
                         title = "标准答案",
                         content = selectedAnswer.question.answer,
                         emphasized = true,
+                        cornerRadius = CardDefaults.CornerRadius,
                     )
                     Spacer(modifier = Modifier.height(16.dp))
                 }
@@ -945,7 +947,7 @@ private fun ClassRankBottomSheet(
                             color = if (item.isSelf) {
                                 MiuixTheme.colorScheme.primary.copy(alpha = 0.12f)
                             } else {
-                                MiuixTheme.colorScheme.surface
+                                LocalEkloseCardSurface.current
                             },
                             contentColor = MiuixTheme.colorScheme.onSurface,
                             borderAlpha = if (item.isSelf) 0.3f else 0.08f,
@@ -1032,14 +1034,15 @@ private fun InfoPanel(
     title: String,
     content: String,
     emphasized: Boolean = false,
+    cornerRadius: Dp = EkloseCornerRadius.Nested,
 ) {
     EkloseCard(
         modifier = Modifier.fillMaxWidth(),
-        cornerRadius = EkloseCornerRadius.Nested,
+        cornerRadius = cornerRadius,
         color = if (emphasized) {
             MiuixTheme.colorScheme.primary.copy(alpha = 0.10f)
         } else {
-            MiuixTheme.colorScheme.surface
+            LocalEkloseCardSurface.current
         },
         contentColor = MiuixTheme.colorScheme.onSurface,
         borderAlpha = 0.12f,

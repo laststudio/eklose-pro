@@ -1036,13 +1036,14 @@ class EkwingAnswerReaderParserTest {
     }
 
     @Test
-    fun answerStateKeepsAllFourSourcesSeparate() {
+    fun answerStateKeepsAllSourcesSeparate() {
         EkwingAnswerState.clear()
         val expectedTitles = mapOf(
             EkwingAnswerSource.Current to "当前考试",
             EkwingAnswerSource.History to "历史考试",
             EkwingAnswerSource.HomeworkCurrent to "当前作业",
             EkwingAnswerSource.HomeworkHistory to "历史作业",
+            EkwingAnswerSource.StudyCenter to "学习中心作业/训练",
         )
 
         expectedTitles.forEach { (source, title) ->
@@ -1083,6 +1084,7 @@ class EkwingAnswerReaderParserTest {
     @Test
     fun onlyReadyParseStateCanOpenPaper() {
         assertEquals(false, canOpenPaper(null))
+        assertEquals(false, canOpenPaper(EkwingAnswerParseState(EkwingAnswerParseStatus.NotStarted)))
         assertEquals(false, canOpenPaper(EkwingAnswerParseState(EkwingAnswerParseStatus.Pending)))
         assertEquals(false, canOpenPaper(EkwingAnswerParseState(EkwingAnswerParseStatus.Loading)))
         assertEquals(false, canOpenPaper(EkwingAnswerParseState(EkwingAnswerParseStatus.Failed, "失败")))

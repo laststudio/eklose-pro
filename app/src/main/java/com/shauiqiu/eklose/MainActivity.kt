@@ -395,7 +395,11 @@ private fun EkloseApp(openHomeRequest: Long = 0L) {
                     val result = EkwingTokenRefreshManager.withTokenRefresh(context) {
                         EkwingAnswerReader(context).readPapers(source = requestedSource)
                     }
-                    "已加载 ${result.size} 份${requestedScope.label}，正在后台解析答案"
+                    if (EkwingLoginStore.shouldAutoParseAllAnswers(context)) {
+                        "已加载 ${result.size} 份${requestedScope.label}，正在后台解析答案"
+                    } else {
+                        "已加载 ${result.size} 份${requestedScope.label}，点击需要查看的${requestedScope.contentName}开始解析"
+                    }
                 } catch (cancelled: CancellationException) {
                     // 删除触发的取消：阻塞 IO 里已完成的状态/缓存写入可能落在 clear 之后，再清一次兜底。
                     EkwingAnswerCacheStore.clear(context)
@@ -1391,7 +1395,7 @@ private fun ReaderPage(
                     GroupSection(title = "${homeworkScope.listName}列表") {
                         papers.forEachIndexed { index, paper ->
                             val parseState = sourceState.parseStateByPaperKey[paper.key]
-                                ?: EkwingAnswerParseState(EkwingAnswerParseStatus.Pending)
+                                ?: EkwingAnswerParseState(EkwingAnswerParseStatus.NotStarted)
                             PaperPreference(
                                 paper = paper,
                                 parseState = parseState,
@@ -1490,7 +1494,10 @@ private fun PaperPreference(
     onRetry: () -> Unit,
     onClick: () -> Unit,
 ) {
+    val canRequestParse = parseState.status == EkwingAnswerParseStatus.NotStarted ||
+        parseState.status == EkwingAnswerParseStatus.Failed
     val statusSummary = when (parseState.status) {
+        EkwingAnswerParseStatus.NotStarted -> "${paper.summary} · 点击解析答案"
         EkwingAnswerParseStatus.Pending -> "${paper.summary} · 等待解析"
         EkwingAnswerParseStatus.Loading -> "${paper.summary} · 正在解析"
         EkwingAnswerParseStatus.Ready -> paper.summary
@@ -1506,7 +1513,7 @@ private fun PaperPreference(
         GroupItem(
             title = paper.title,
             summary = statusSummary,
-            onClick = onRetry.takeIf { parseState.status == EkwingAnswerParseStatus.Failed },
+            onClick = onRetry.takeIf { canRequestParse },
             value = "重试".takeIf { parseState.status == EkwingAnswerParseStatus.Failed },
             trailing = {
                 if (parseState.status == EkwingAnswerParseStatus.Pending || parseState.status == EkwingAnswerParseStatus.Loading) {
@@ -1516,7 +1523,7 @@ private fun PaperPreference(
                     )
                 }
             },
-            showArrow = parseState.status == EkwingAnswerParseStatus.Failed,
+            showArrow = canRequestParse,
             isError = parseState.status == EkwingAnswerParseStatus.Failed,
         )
     }

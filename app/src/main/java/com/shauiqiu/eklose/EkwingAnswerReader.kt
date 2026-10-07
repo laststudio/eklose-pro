@@ -107,6 +107,7 @@ enum class EkwingAnswerSource(
 }
 
 enum class EkwingAnswerParseStatus {
+    NotStarted,
     Pending,
     Loading,
     Ready,
@@ -135,6 +136,35 @@ internal fun canReuseAnswerCache(state: EkwingAnswerSourceState, paperKey: Strin
     val sections = state.sectionsByPaperKey[paperKey] ?: return false
     return state.parseStateByPaperKey[paperKey]?.status != EkwingAnswerParseStatus.Failed &&
         sections.none { it.category == "error" }
+}
+
+/** Only requested work should appear queued; successful caches remain directly viewable. */
+internal fun paperParseStateAfterListRead(
+    state: EkwingAnswerSourceState,
+    paperKey: String,
+    isParsing: Boolean = false,
+): EkwingAnswerParseState {
+    val existing = state.parseStateByPaperKey[paperKey]
+    return when {
+        canReuseAnswerCache(state, paperKey) -> EkwingAnswerParseState(EkwingAnswerParseStatus.Ready)
+        isParsing -> existing?.takeIf { it.status == EkwingAnswerParseStatus.Loading }
+            ?: EkwingAnswerParseState(EkwingAnswerParseStatus.Pending)
+        existing?.status == EkwingAnswerParseStatus.Failed -> existing
+        else -> EkwingAnswerParseState(EkwingAnswerParseStatus.NotStarted)
+    }
+}
+
+internal fun restorePaperParseStates(
+    state: EkwingAnswerSourceState,
+    isParsing: (String) -> Boolean = { false },
+): EkwingAnswerSourceState {
+    val paperKeys = state.papers.map { it.key }.toSet() +
+        state.parseStateByPaperKey.keys + state.sectionsByPaperKey.keys
+    return state.copy(
+        parseStateByPaperKey = paperKeys.associateWith { key ->
+            paperParseStateAfterListRead(state, key, isParsing = isParsing(key))
+        },
+    )
 }
 
 object EkwingAnswerState {
@@ -197,7 +227,10 @@ object EkwingAnswerCacheStore {
 
     fun restore(context: Context) {
         EkwingAnswerSource.entries.forEach { source ->
-            EkwingAnswerState.setSourceState(source, loadSourceState(context, source))
+            val restoredState = restorePaperParseStates(loadSourceState(context, source)) { key ->
+                EkwingAnswerPrefetchManager.isEnqueued(source, key)
+            }
+            EkwingAnswerState.setSourceState(source, restoredState)
         }
     }
 
@@ -233,7 +266,17 @@ object EkwingAnswerPrefetchManager {
     private const val CONCURRENCY = 3
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val semaphore = Semaphore(CONCURRENCY)
-    private val jobs = mutableMapOf<String, Job>()
+    private data class ParseJob(
+        val job: Job,
+        val source: EkwingAnswerSource,
+        val paperKey: String,
+        val automatic: Boolean,
+    )
+    private val jobs = mutableMapOf<String, ParseJob>()
+
+    fun isEnqueued(source: EkwingAnswerSource, paperKey: String): Boolean {
+        return synchronized(jobs) { jobs["${source.cacheKey}:$paperKey"]?.job?.isActive == true }
+    }
 
     fun enqueueAll(
         context: Context,
@@ -241,19 +284,25 @@ object EkwingAnswerPrefetchManager {
         papers: List<EkwingAnswerPaper>,
     ) {
         val appContext = context.applicationContext
-        papers.forEach { paper -> enqueue(appContext, source, paper.key) }
+        papers.forEach { paper -> enqueue(appContext, source, paper.key, automatic = true) }
     }
 
     fun enqueue(
         context: Context,
         source: EkwingAnswerSource,
         paperKey: String,
+        automatic: Boolean = false,
     ) {
         if (paperKey.isBlank()) return
         val jobKey = "${source.cacheKey}:$paperKey"
         synchronized(jobs) {
+            if (automatic && !EkwingLoginStore.shouldAutoParseAllAnswers(context)) return
             val existing = jobs[jobKey]
-            if (existing?.isActive == true) return
+            if (existing?.job?.isActive == true) {
+                // A user-requested item must survive switching off automatic parsing.
+                if (!automatic && existing.automatic) jobs[jobKey] = existing.copy(automatic = false)
+                return
+            }
             val currentState = EkwingAnswerState.sourceState(source)
             if (canReuseAnswerCache(currentState, paperKey)) {
                 EkwingAnswerState.updateSource(source) {
@@ -277,18 +326,38 @@ object EkwingAnswerPrefetchManager {
                 } finally {
                     val ownJob = coroutineContext.job
                     synchronized(jobs) {
-                        if (jobs[jobKey] === ownJob) jobs.remove(jobKey)
+                        if (jobs[jobKey]?.job === ownJob) jobs.remove(jobKey)
                     }
                 }
             }
-            jobs[jobKey] = job
+            jobs[jobKey] = ParseJob(job, source, paperKey, automatic)
             job.start()
+        }
+    }
+
+    fun cancelAutomatic(context: Context) {
+        synchronized(jobs) {
+            jobs.filterValues { it.automatic }.forEach { (key, request) ->
+                request.job.cancel()
+                jobs.remove(key)
+                val state = EkwingAnswerState.sourceState(request.source)
+                val status = state.parseStateByPaperKey[request.paperKey]?.status
+                if (status == EkwingAnswerParseStatus.Pending || status == EkwingAnswerParseStatus.Loading) {
+                    EkwingAnswerState.updateSource(request.source) {
+                        it.copy(parseStateByPaperKey = it.parseStateByPaperKey +
+                            (request.paperKey to EkwingAnswerParseState(EkwingAnswerParseStatus.NotStarted)))
+                    }
+                    EkwingAnswerCacheStore.saveSourceState(
+                        context, request.source, EkwingAnswerState.sourceState(request.source),
+                    )
+                }
+            }
         }
     }
 
     fun cancelAll() {
         synchronized(jobs) {
-            jobs.values.forEach { it.cancel() }
+            jobs.values.forEach { it.job.cancel() }
             jobs.clear()
         }
     }
@@ -298,10 +367,20 @@ object EkwingAnswerPrefetchManager {
         source: EkwingAnswerSource,
         paperKey: String,
     ) {
-        EkwingAnswerState.updateSource(source) {
+        val parseJob = currentCoroutineContext().job
+        fun saveParseState(transform: (EkwingAnswerSourceState) -> EkwingAnswerSourceState) {
+            synchronized(jobs) {
+                parseJob.ensureActive()
+                if (jobs["${source.cacheKey}:$paperKey"]?.job !== parseJob) {
+                    throw CancellationException("答案解析任务已取消")
+                }
+                EkwingAnswerState.updateSource(source, transform)
+                EkwingAnswerCacheStore.saveSourceState(context, source, EkwingAnswerState.sourceState(source))
+            }
+        }
+        saveParseState {
             it.copy(parseStateByPaperKey = it.parseStateByPaperKey + (paperKey to EkwingAnswerParseState(EkwingAnswerParseStatus.Loading)))
         }
-        EkwingAnswerCacheStore.saveSourceState(context, source, EkwingAnswerState.sourceState(source))
 
         val sections = runCatching {
             EkwingTokenRefreshManager.withTokenRefresh(context) {
@@ -310,7 +389,7 @@ object EkwingAnswerPrefetchManager {
         }.getOrElse { error ->
             if (error is CancellationException) throw error
             val failed = EkwingAnswerAssembler.readFailureSection(error)
-            EkwingAnswerState.updateSource(source) {
+            saveParseState {
                 it.copy(
                     sectionsByPaperKey = it.sectionsByPaperKey + (paperKey to listOf(failed)),
                     parseStateByPaperKey = it.parseStateByPaperKey + (
@@ -321,7 +400,6 @@ object EkwingAnswerPrefetchManager {
                         ),
                 )
             }
-            EkwingAnswerCacheStore.saveSourceState(context, source, EkwingAnswerState.sourceState(source))
             return
         }
 
@@ -334,13 +412,12 @@ object EkwingAnswerPrefetchManager {
         } else {
             EkwingAnswerParseState(EkwingAnswerParseStatus.Ready)
         }
-        EkwingAnswerState.updateSource(source) {
+        saveParseState {
             it.copy(
                 sectionsByPaperKey = it.sectionsByPaperKey + (paperKey to sections),
                 parseStateByPaperKey = it.parseStateByPaperKey + (paperKey to parseState),
             )
         }
-        EkwingAnswerCacheStore.saveSourceState(context, source, EkwingAnswerState.sourceState(source))
     }
 }
 
@@ -389,7 +466,10 @@ internal fun sourceStateFromJson(value: JSONObject): EkwingAnswerSourceState {
             }
         }
     }
-    val readyStates = sectionsByPaperKey.keys.associateWith { EkwingAnswerParseState(EkwingAnswerParseStatus.Ready) }
+    val readyStates = sectionsByPaperKey.filter { (key, sections) ->
+        sections.none { it.category == "error" } &&
+            parseStateByPaperKey[key]?.status != EkwingAnswerParseStatus.Failed
+    }.keys.associateWith { EkwingAnswerParseState(EkwingAnswerParseStatus.Ready) }
     return EkwingAnswerSourceState(
         papers = papers,
         taskByPaperKey = taskByPaperKey,
@@ -568,15 +648,15 @@ class EkwingAnswerReader(private val context: Context) {
         val paperKeys = papers.map { it.key }.toSet()
         val sectionsByPaperKey = oldState.sectionsByPaperKey.filterKeys { it in paperKeys }
         val classScoreReportByPaperKey = oldState.classScoreReportByPaperKey.filterKeys { it in paperKeys }
+        val autoParseAll = EkwingLoginStore.shouldAutoParseAllAnswers(context)
+        // Publish unrequested items as idle; enqueue() marks only real queued jobs Pending.
+        // Switching off while the list is loading must not leave phantom queued items.
         val parseStateByPaperKey = papers.associate { paper ->
-            val existing = oldState.parseStateByPaperKey[paper.key]
-            val state = when {
-                sectionsByPaperKey.containsKey(paper.key) -> EkwingAnswerParseState(EkwingAnswerParseStatus.Ready)
-                existing?.status == EkwingAnswerParseStatus.Loading -> EkwingAnswerParseState(EkwingAnswerParseStatus.Pending)
-                existing != null -> existing
-                else -> EkwingAnswerParseState(EkwingAnswerParseStatus.Pending)
-            }
-            paper.key to state
+            paper.key to paperParseStateAfterListRead(
+                state = oldState,
+                paperKey = paper.key,
+                isParsing = EkwingAnswerPrefetchManager.isEnqueued(source, paper.key),
+            )
         }
         val newState = EkwingAnswerSourceState(
             papers = papers,
@@ -587,7 +667,7 @@ class EkwingAnswerReader(private val context: Context) {
         )
         EkwingAnswerState.setSourceState(source, newState)
         EkwingAnswerCacheStore.saveSourceState(context, source, newState)
-        EkwingAnswerPrefetchManager.enqueueAll(context, source, papers)
+        if (autoParseAll) EkwingAnswerPrefetchManager.enqueueAll(context, source, papers)
         return papers
     }
 

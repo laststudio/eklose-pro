@@ -8,6 +8,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AccountCircle
 import androidx.compose.material.icons.rounded.DriveFileRenameOutline
+import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.foundation.layout.Arrangement
@@ -132,6 +133,10 @@ internal fun SettingsScreen(
     var autoRefreshToken by rememberSaveable {
         mutableStateOf(EkwingLoginStore.shouldAutoRefreshToken(context))
     }
+    var autoParseAllAnswers by rememberSaveable {
+        mutableStateOf(EkwingLoginStore.shouldAutoParseAllAnswers(context))
+    }
+    var showAutoParseAllAnswersDialog by rememberSaveable { mutableStateOf(false) }
     var floatingNavigationBar by rememberSaveable {
         mutableStateOf(EkwingLoginStore.useFloatingNavigationBar(context))
     }
@@ -209,6 +214,31 @@ internal fun SettingsScreen(
                         )
                         GroupDivider()
                         GroupItem(
+                            title = "自动解析全部题目",
+                            leading = {
+                                SettingsLeadingIcon(Icons.Rounded.Download, "自动解析全部题目")
+                            },
+                            summary = if (autoParseAllAnswers) {
+                                "读取列表后，自动下载并解析全部题目"
+                            } else {
+                                "点击列表中的题目后，才下载并解析该题目"
+                            },
+                            trailing = {
+                                Switch(
+                                    checked = autoParseAllAnswers,
+                                    onCheckedChange = { enabled ->
+                                        if (enabled) {
+                                            showAutoParseAllAnswersDialog = true
+                                        } else {
+                                            EkwingLoginStore.setAutoParseAllAnswers(context, false)
+                                            autoParseAllAnswers = false
+                                        }
+                                    },
+                                )
+                            },
+                        )
+                        GroupDivider()
+                        GroupItem(
                             title = "实名登录姓名替换",
                             leading = {
                                 SettingsLeadingIcon(Icons.Rounded.DriveFileRenameOutline, "实名登录姓名替换")
@@ -242,6 +272,15 @@ internal fun SettingsScreen(
                 }
             }
         }
+        AutoParseAllAnswersDialog(
+            show = showAutoParseAllAnswersDialog,
+            onDismiss = { showAutoParseAllAnswersDialog = false },
+            onConfirm = {
+                EkwingLoginStore.setAutoParseAllAnswers(context, true)
+                autoParseAllAnswers = true
+                showAutoParseAllAnswersDialog = false
+            },
+        )
         RealNameAliasDialog(
             show = showRealNameAliasDialog,
             fromName = draftAliasFrom,
@@ -301,6 +340,41 @@ private fun SettingsLeadingIcon(icon: ImageVector, description: String) {
         modifier = Modifier.padding(end = 6.dp).size(24.dp),
         tint = MiuixTheme.colorScheme.onBackground,
     )
+}
+
+@Composable
+private fun AutoParseAllAnswersDialog(
+    show: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    OverlayDialog(
+        show = show,
+        title = "开启自动解析全部题目？",
+        summary = "开启后，每次读取考试、作业或训练列表，都会自动下载并解析列表中的全部题目，而不只是你点击的题目。\n\n这会增加网络请求和流量消耗，题目较多时也需要更长时间。只查看少量题目时，建议保持关闭。\n\n关闭后，点击需要查看的题目才开始解析；已解析的答案仍可直接查看。",
+        onDismissRequest = onDismiss,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            TextButton(
+                text = "保持关闭",
+                onClick = onDismiss,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(modifier = Modifier.width(20.dp))
+            TextButton(
+                text = "确认开启",
+                onClick = onConfirm,
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.textButtonColors(
+                    color = MiuixTheme.colorScheme.primary,
+                    textColor = MiuixTheme.colorScheme.onPrimary,
+                ),
+            )
+        }
+    }
 }
 
 @Composable
