@@ -310,7 +310,7 @@ object EkwingLoginStore {
         identity: EkwingLoginIdentity,
     ) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val shouldSaveLogin = prefs.getBoolean(KEY_SAVE_LOGIN, true)
+        val shouldSaveLogin = prefs.getBoolean(KEY_SAVE_LOGIN, false)
         val accountChanged = prefs.getString("uid", null) != result.uid
         prefs.edit()
             .putString("uid", result.uid)
@@ -385,7 +385,7 @@ object EkwingLoginStore {
 
     fun shouldSaveLogin(context: Context): Boolean {
         return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .getBoolean(KEY_SAVE_LOGIN, true)
+            .getBoolean(KEY_SAVE_LOGIN, false)
     }
 
     fun shouldAutoRefreshToken(context: Context): Boolean {
@@ -461,7 +461,7 @@ object EkwingLoginStore {
 
     fun useFloatingNavigationBarGlass(context: Context): Boolean {
         return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .getBoolean(KEY_FLOATING_NAVIGATION_BAR_GLASS, true)
+            .getBoolean(KEY_FLOATING_NAVIGATION_BAR_GLASS, false)
     }
 
     fun setUseFloatingNavigationBarGlass(context: Context, enabled: Boolean) {
@@ -557,7 +557,7 @@ object EkwingLoginStore {
 
     fun predictiveBackEnabled(context: Context): Boolean {
         return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .getBoolean(KEY_PREDICTIVE_BACK_ENABLED, false)
+            .getBoolean(KEY_PREDICTIVE_BACK_ENABLED, true)
     }
 
     fun setPredictiveBackEnabled(context: Context, enabled: Boolean) {
@@ -571,11 +571,11 @@ object EkwingLoginStore {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
             if (key == KEY_PREDICTIVE_BACK_ENABLED || key == null) {
-                onChanged(prefs.getBoolean(KEY_PREDICTIVE_BACK_ENABLED, false))
+                onChanged(prefs.getBoolean(KEY_PREDICTIVE_BACK_ENABLED, true))
             }
         }
         prefs.registerOnSharedPreferenceChangeListener(listener)
-        onChanged(prefs.getBoolean(KEY_PREDICTIVE_BACK_ENABLED, false))
+        onChanged(prefs.getBoolean(KEY_PREDICTIVE_BACK_ENABLED, true))
         return { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
     }
 
