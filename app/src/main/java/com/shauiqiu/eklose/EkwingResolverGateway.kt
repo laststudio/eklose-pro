@@ -78,6 +78,28 @@ internal object EkwingResolverGateway {
         }
     }
 
+    /** 云端模式功能标识：读取学习中心任务/作业列表的门禁（对齐 fe 的 cloud_mode）。 */
+    const val CLOUD_MODE_FEATURE: String = "cloud_mode"
+
+    /**
+     * 按功能名门禁（云端模式等）：显式停用或校验失败抛 [EkwingResolverDeniedException]；
+     * `not_found`（功能尚未在后台登记）视为门禁未启用，放行——支持"先发版、后台后登记"。
+     * 阻塞调用，必须在 Dispatchers.IO 上。
+     */
+    fun ensureFeatureAllowed(featureKey: String) {
+        val envelope = try {
+            callOp("authorize", JSONObject().apply { put("feature_key", featureKey) })
+        } catch (denied: EkwingResolverDeniedException) {
+            if (denied.code == "not_found") {
+                Log.w(TAG, "功能 $featureKey 尚未登记，门禁未启用，放行")
+                return
+            }
+            throw denied
+        }
+        // null = 非应用进程（单测/桌面），交回调用方逻辑
+        envelope ?: return
+    }
+
     /** 服务器**显式**停用的拒绝码：出现这些码时，已缓存的答案也必须收回。 */
     private val EXPLICIT_DENY_CODES = setOf(
         "feature_disabled",

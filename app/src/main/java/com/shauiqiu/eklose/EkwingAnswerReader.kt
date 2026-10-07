@@ -663,6 +663,8 @@ class EkwingAnswerReader(private val context: Context) {
     }
 
     fun readPapers(source: EkwingAnswerSource): List<EkwingAnswerPaper> {
+        // 云端模式门禁：后台可停用"读取任务/作业列表"；未登记该功能时自动放行（见网关说明）
+        EkwingResolverGateway.ensureFeatureAllowed(EkwingResolverGateway.CLOUD_MODE_FEATURE)
         val history = source.isHistory
         val isHomework = source.isHomework
         val session = EkwingLoginStore.loadSession(context)
