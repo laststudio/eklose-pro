@@ -687,20 +687,47 @@ class EkwingAnswerReader(private val context: Context) {
         val cachedSections = EkwingAnswerState.sourceState(source).sectionsByPaperKey[paperKey]
         val cachedReport = EkwingAnswerState.sourceState(source).classScoreReportByPaperKey[paperKey]
         if (cachedSections != null) {
-            if (cachedReport == null) {
-                val examText = EkwingAnswerState.sourceState(source).taskByPaperKey[paperKey]
-                val task = examText?.let { ekwingReadAttempt { JSONObject(it) }.getOrNull() }
-                if (task != null) {
-                    val report = extractClassScoreReport(task)
-                    if (report != null) {
-                        EkwingAnswerState.updateSource(source) { state ->
-                            state.copy(classScoreReportByPaperKey = state.classScoreReportByPaperKey + (paperKey to report))
+            // 后台开关必须管得住缓存：展示前做一次轻量授权检查
+            // （so 侧对 120s 内的 grant 只做本地验签，多数情况无网络开销）。
+            // - 服务器显式停用 → 收回缓存答案，写入失败区块
+            // - 缓存的失败区块 + 本次已放行（开关恢复）→ 落到下方重新解析，成功后自动覆盖
+            // - 网络异常等不确定 → 放行缓存，不打扰离线阅读
+            val denial = EkwingResolverGateway.explicitDenialOrNull()
+            val cachedIsFailure = cachedSections.any { it.category == "error" }
+            if (denial != null) {
+                val failure = listOf(EkwingAnswerAssembler.readFailureSection(denial))
+                EkwingAnswerState.updateSource(source) {
+                    it.copy(
+                        sectionsByPaperKey = it.sectionsByPaperKey + (paperKey to failure),
+                        parseStateByPaperKey = it.parseStateByPaperKey + (paperKey to EkwingAnswerParseState(
+                            status = EkwingAnswerParseStatus.Failed,
+                            errorMessage = denial.message,
+                        )),
+                    )
+                }
+                EkwingAnswerCacheStore.saveSourceState(context, source, EkwingAnswerState.sourceState(source))
+                return failure
+            }
+            if (!cachedIsFailure) {
+                if (cachedReport == null) {
+                    val examText = EkwingAnswerState.sourceState(source).taskByPaperKey[paperKey]
+                    val task = examText?.let { ekwingReadAttempt { JSONObject(it) }.getOrNull() }
+                    if (task != null) {
+                        val report = extractClassScoreReport(task)
+                        if (report != null) {
+                            EkwingAnswerState.updateSource(source) { state ->
+                                state.copy(classScoreReportByPaperKey = state.classScoreReportByPaperKey + (paperKey to report))
+                            }
+                            EkwingAnswerCacheStore.saveSourceState(context, source, EkwingAnswerState.sourceState(source))
                         }
-                        EkwingAnswerCacheStore.saveSourceState(context, source, EkwingAnswerState.sourceState(source))
                     }
                 }
+                return cachedSections
             }
-            return cachedSections
+            // 失败区块 + 已放行：仅当任务缓存仍在时重新解析（否则原样返回，等列表刷新）
+            if (!EkwingAnswerState.sourceState(source).taskByPaperKey.containsKey(paperKey)) {
+                return cachedSections
+            }
         }
 
         val examText = EkwingAnswerState.sourceState(source).taskByPaperKey[paperKey]
@@ -1660,7 +1687,9 @@ private fun mergeJsonObjects(first: JSONObject?, second: JSONObject): JSONObject
 
 internal object EkwingAnswerParser {
     fun parseHomeworkAnswerQuestions(value: Any?): List<EkwingAnswerQuestion> {
-        // so 优先：解析口径单一事实源（ekwing_resolver）；so 不可用或返回为空时回退本地实现
+        // so 优先：解析口径单一事实源（ekwing_resolver）。
+        // so 拒绝（后台开关/鉴权失败）会抛 EkwingResolverDeniedException 硬停，绝不回退；
+        // 仅"授权通过但 so 没解析出数据"（返回 null）才走本地启发式补充。
         EkwingResolverGateway.homeworkQuestions(value)?.let { return it }
         val normalized = normalizeJson(value)
         val answerRoot = (normalized as? JSONObject)?.optJSONObject("ans")
@@ -1714,7 +1743,8 @@ internal fun examAnswerQuestions(scoreInfo: Any?, modelScoreInfos: Any?): List<E
 }
 
 internal fun parseJsonExamAnswers(root: Any?): List<EkwingAnswerQuestion> {
-    // so 优先：模块成绩逐题答案（与 ekwing_resolver 真实语料对拍 0 差异的那条口径）
+    // so 优先：模块成绩逐题答案（与 ekwing_resolver 真实语料对拍 0 差异的那条口径）。
+    // so 拒绝时抛 EkwingResolverDeniedException 硬停；仅空结果才回退本地实现。
     EkwingResolverGateway.examQuestions(root)?.let { return it }
     val questions = mutableListOf<EkwingAnswerQuestion>()
     extractModelScoreItems(root).forEach { item ->
