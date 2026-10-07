@@ -419,7 +419,7 @@ private fun EkloseApp(openHomeRequest: Long = 0L) {
         fun deleteReadResults() {
             // 先取消进行中的读取，否则读取完成后会把状态/缓存写回，删除看起来像没生效。
             readJob?.cancel()
-            EkwingAnswerPrefetchManager.cancelAll()
+            EkwingAnswerPrefetchManager.cancelAll(context)
             EkwingAnswerCacheStore.clear(context)
             readerSummary = "已清空读取结果"
             scope.launch { snackbarHostState.showSnackbar("已清空读取结果") }
@@ -901,7 +901,7 @@ private fun HomePage(
                 },
                 onLogoutHint = onLogoutHint,
                 onLogout = {
-                    EkwingAnswerPrefetchManager.cancelAll()
+                    EkwingAnswerPrefetchManager.cancelAll(context)
                     EkwingLoginStore.clearSession(context)
                     EkwingAnswerCacheStore.clear(context)
                     loginSession = null
@@ -1399,6 +1399,10 @@ private fun ReaderPage(
                             PaperPreference(
                                 paper = paper,
                                 parseState = parseState,
+                                isActivelyParsing = EkwingAnswerPrefetchManager.isEnqueued(
+                                    HomeworkScope.entries[selectedHomeworkScopeIndex].answerSource,
+                                    paper.key,
+                                ),
                                 onRetry = {
                                     EkwingAnswerPrefetchManager.enqueue(
                                         context = context,
@@ -1491,15 +1495,22 @@ private fun FeedbackPreference(
 private fun PaperPreference(
     paper: EkwingAnswerPaper,
     parseState: EkwingAnswerParseState,
+    isActivelyParsing: Boolean = false,
     onRetry: () -> Unit,
     onClick: () -> Unit,
 ) {
+    // 卡在等待/解析中但没有活跃任务（任务被取消/异常退出）→ 允许点击重试自救，
+    // 否则会永远转圈且无任何出口。
+    val stuckParsing = (parseState.status == EkwingAnswerParseStatus.Pending ||
+        parseState.status == EkwingAnswerParseStatus.Loading) && !isActivelyParsing
     val canRequestParse = parseState.status == EkwingAnswerParseStatus.NotStarted ||
-        parseState.status == EkwingAnswerParseStatus.Failed
+        parseState.status == EkwingAnswerParseStatus.Failed || stuckParsing
     val statusSummary = when (parseState.status) {
         EkwingAnswerParseStatus.NotStarted -> "${paper.summary} · 点击解析答案"
-        EkwingAnswerParseStatus.Pending -> "${paper.summary} · 等待解析"
-        EkwingAnswerParseStatus.Loading -> "${paper.summary} · 正在解析"
+        EkwingAnswerParseStatus.Pending ->
+            "${paper.summary} · ${if (stuckParsing) "点击重试" else "等待解析"}"
+        EkwingAnswerParseStatus.Loading ->
+            "${paper.summary} · ${if (stuckParsing) "点击重试" else "正在解析"}"
         EkwingAnswerParseStatus.Ready -> paper.summary
         EkwingAnswerParseStatus.Failed -> "${paper.summary} · 解析失败：${parseState.errorMessage ?: "未知错误"}"
     }
@@ -1514,9 +1525,12 @@ private fun PaperPreference(
             title = paper.title,
             summary = statusSummary,
             onClick = onRetry.takeIf { canRequestParse },
-            value = "重试".takeIf { parseState.status == EkwingAnswerParseStatus.Failed },
+            value = "重试".takeIf { parseState.status == EkwingAnswerParseStatus.Failed || stuckParsing },
             trailing = {
-                if (parseState.status == EkwingAnswerParseStatus.Pending || parseState.status == EkwingAnswerParseStatus.Loading) {
+                if (!stuckParsing &&
+                    (parseState.status == EkwingAnswerParseStatus.Pending ||
+                        parseState.status == EkwingAnswerParseStatus.Loading)
+                ) {
                     InfiniteProgressIndicator(
                         color = MiuixTheme.colorScheme.primary,
                         size = 20.dp,

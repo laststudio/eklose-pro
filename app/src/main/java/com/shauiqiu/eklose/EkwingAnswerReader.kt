@@ -305,10 +305,14 @@ object EkwingAnswerPrefetchManager {
             }
             val currentState = EkwingAnswerState.sourceState(source)
             if (canReuseAnswerCache(currentState, paperKey)) {
+                // 缓存命中：先给出 Ready（界面即时可用），再静默跑一次授权校验——
+                // readAnswerSections 的缓存分支会在显式停用时收回缓存并转 Failed，
+                // 保证后台开关对"已缓存的试卷"同样生效（不闪 Loading）。
                 EkwingAnswerState.updateSource(source) {
                     it.copy(parseStateByPaperKey = it.parseStateByPaperKey + (paperKey to EkwingAnswerParseState(EkwingAnswerParseStatus.Ready)))
                 }
                 EkwingAnswerCacheStore.saveSourceState(context, source, EkwingAnswerState.sourceState(source))
+                launchJob(context.applicationContext, source, paperKey, automatic = automatic, silent = true)
                 return
             }
             EkwingAnswerState.updateSource(source) {
@@ -318,21 +322,48 @@ object EkwingAnswerPrefetchManager {
                 )
             }
             EkwingAnswerCacheStore.saveSourceState(context, source, EkwingAnswerState.sourceState(source))
-            val job = scope.launch(start = CoroutineStart.LAZY) {
-                try {
-                    semaphore.withPermit {
-                        parseOne(context.applicationContext, source, paperKey)
-                    }
-                } finally {
-                    val ownJob = coroutineContext.job
-                    synchronized(jobs) {
-                        if (jobs[jobKey]?.job === ownJob) jobs.remove(jobKey)
-                    }
+            launchJob(context.applicationContext, source, paperKey, automatic = automatic, silent = false)
+        }
+    }
+
+    /** 静默校验一批"缓存可复用"的试卷（列表读取后调用；并发受限、失败即 Flush 为失败态）。 */
+    fun verifyCached(context: Context, source: EkwingAnswerSource, paperKeys: List<String>) {
+        val appContext = context.applicationContext
+        synchronized(jobs) {
+            paperKeys.forEach { paperKey ->
+                if (paperKey.isBlank()) return@forEach
+                val jobKey = "${source.cacheKey}:$paperKey"
+                if (jobs[jobKey]?.job?.isActive == true) return@forEach
+                val state = EkwingAnswerState.sourceState(source)
+                if (state.parseStateByPaperKey[paperKey]?.status != EkwingAnswerParseStatus.Ready) return@forEach
+                if (!canReuseAnswerCache(state, paperKey)) return@forEach
+                launchJob(appContext, source, paperKey, automatic = false, silent = true)
+            }
+        }
+    }
+
+    private fun launchJob(
+        appContext: Context,
+        source: EkwingAnswerSource,
+        paperKey: String,
+        automatic: Boolean,
+        silent: Boolean,
+    ) {
+        val jobKey = "${source.cacheKey}:$paperKey"
+        val job = scope.launch(start = CoroutineStart.LAZY) {
+            try {
+                semaphore.withPermit {
+                    parseOne(appContext, source, paperKey, silent = silent)
+                }
+            } finally {
+                val ownJob = coroutineContext.job
+                synchronized(jobs) {
+                    if (jobs[jobKey]?.job === ownJob) jobs.remove(jobKey)
                 }
             }
-            jobs[jobKey] = ParseJob(job, source, paperKey, automatic)
-            job.start()
         }
+        jobs[jobKey] = ParseJob(job, source, paperKey, automatic)
+        job.start()
     }
 
     fun cancelAutomatic(context: Context) {
@@ -355,9 +386,25 @@ object EkwingAnswerPrefetchManager {
         }
     }
 
-    fun cancelAll() {
+    fun cancelAll(context: Context) {
+        val appContext = context.applicationContext
         synchronized(jobs) {
-            jobs.values.forEach { it.job.cancel() }
+            jobs.values.forEach { request ->
+                request.job.cancel()
+                // 被取消的任务不回写状态：不清理的话试卷会永远停在"等待解析/正在解析"
+                // 的转圈态，且该状态在列表里不可点、无任何出口。
+                val state = EkwingAnswerState.sourceState(request.source)
+                val status = state.parseStateByPaperKey[request.paperKey]?.status
+                if (status == EkwingAnswerParseStatus.Pending || status == EkwingAnswerParseStatus.Loading) {
+                    EkwingAnswerState.updateSource(request.source) {
+                        it.copy(parseStateByPaperKey = it.parseStateByPaperKey +
+                            (request.paperKey to EkwingAnswerParseState(EkwingAnswerParseStatus.NotStarted)))
+                    }
+                    EkwingAnswerCacheStore.saveSourceState(
+                        appContext, request.source, EkwingAnswerState.sourceState(request.source),
+                    )
+                }
+            }
             jobs.clear()
         }
     }
@@ -366,6 +413,7 @@ object EkwingAnswerPrefetchManager {
         context: Context,
         source: EkwingAnswerSource,
         paperKey: String,
+        silent: Boolean = false,
     ) {
         val parseJob = currentCoroutineContext().job
         fun saveParseState(transform: (EkwingAnswerSourceState) -> EkwingAnswerSourceState) {
@@ -378,8 +426,10 @@ object EkwingAnswerPrefetchManager {
                 EkwingAnswerCacheStore.saveSourceState(context, source, EkwingAnswerState.sourceState(source))
             }
         }
-        saveParseState {
-            it.copy(parseStateByPaperKey = it.parseStateByPaperKey + (paperKey to EkwingAnswerParseState(EkwingAnswerParseStatus.Loading)))
+        if (!silent) {
+            saveParseState {
+                it.copy(parseStateByPaperKey = it.parseStateByPaperKey + (paperKey to EkwingAnswerParseState(EkwingAnswerParseStatus.Loading)))
+            }
         }
 
         val sections = runCatching {
@@ -668,6 +718,12 @@ class EkwingAnswerReader(private val context: Context) {
         EkwingAnswerState.setSourceState(source, newState)
         EkwingAnswerCacheStore.saveSourceState(context, source, newState)
         if (autoParseAll) EkwingAnswerPrefetchManager.enqueueAll(context, source, papers)
+        // 已缓存试卷也要过授权：显式停用（后台开关/急停）时收回缓存、转为失败态
+        EkwingAnswerPrefetchManager.verifyCached(
+            context,
+            source,
+            papers.map { it.key }.filter { canReuseAnswerCache(newState, it) },
+        )
         return papers
     }
 
