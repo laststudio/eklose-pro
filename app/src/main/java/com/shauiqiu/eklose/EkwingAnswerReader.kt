@@ -226,11 +226,18 @@ object EkwingAnswerCacheStore {
     private const val PREFS_NAME = "ekwing_answer_cache"
 
     fun restore(context: Context) {
+        val appContext = context.applicationContext
         EkwingAnswerSource.entries.forEach { source ->
             val restoredState = restorePaperParseStates(loadSourceState(context, source)) { key ->
                 EkwingAnswerPrefetchManager.isEnqueued(source, key)
             }
             EkwingAnswerState.setSourceState(source, restoredState)
+            // 启动恢复的缓存试卷同样过授权：后台停用时打开即收回并转失败态
+            EkwingAnswerPrefetchManager.verifyCached(
+                appContext,
+                source,
+                restoredState.papers.map { it.key }.filter { canReuseAnswerCache(restoredState, it) },
+            )
         }
     }
 
