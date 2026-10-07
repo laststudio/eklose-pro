@@ -116,6 +116,7 @@ class AnswerActivity : ComponentActivity() {
                     source = source,
                     onBack = ::finish,
                 )
+                EkwingTokenRefreshDialog()
             }
         }
     }

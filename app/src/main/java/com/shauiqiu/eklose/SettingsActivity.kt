@@ -122,6 +122,9 @@ internal fun SettingsScreen(
     val scrollBehavior = MiuixScrollBehavior()
     val blurBackdrop = rememberEkloseBlurBackdrop()
     var saveLogin by rememberSaveable { mutableStateOf(EkwingLoginStore.shouldSaveLogin(context)) }
+    var autoRefreshToken by rememberSaveable {
+        mutableStateOf(EkwingLoginStore.shouldAutoRefreshToken(context))
+    }
     var basicApi by rememberSaveable { mutableStateOf(EkwingLoginStore.useBasicApi(context)) }
     var allPages by rememberSaveable { mutableStateOf(EkwingLoginStore.loadAllPages(context)) }
     var floatingNavigationBar by rememberSaveable {
@@ -159,14 +162,36 @@ internal fun SettingsScreen(
                 item {
                     GroupSection(title = "账号与列表") {
                         GroupItem(
-                            title = "保存登录状态",
-                            summary = "保存 uid/token、登录信息和密码",
+                            title = "保持登录状态",
+                            summary = if (saveLogin) {
+                                "记住账号密码，重启后保持登录"
+                            } else {
+                                "仅本次使用有效，重启后清除登录状态"
+                            },
                             trailing = {
                                 Switch(
                                     checked = saveLogin,
                                     onCheckedChange = {
                                         saveLogin = it
                                         EkwingLoginStore.setSaveLogin(context, it)
+                                    },
+                                )
+                            },
+                        )
+                        GroupDivider()
+                        GroupItem(
+                            title = "自动刷新 token",
+                            summary = if (autoRefreshToken) {
+                                "登录凭证失效时，使用已保存的账号密码自动刷新"
+                            } else {
+                                "登录凭证失效时，询问是否刷新"
+                            },
+                            trailing = {
+                                Switch(
+                                    checked = autoRefreshToken,
+                                    onCheckedChange = {
+                                        autoRefreshToken = it
+                                        EkwingLoginStore.setAutoRefreshToken(context, it)
                                     },
                                 )
                             },
@@ -219,7 +244,7 @@ internal fun SettingsScreen(
                     GroupSection(title = "界面") {
                         GroupItem(
                             title = "主题",
-                            summary = "打开 KernelSU 风格主题页面",
+                            summary = "自定义主题选项",
                             onClick = {
                                 context.startActivity(Intent(context, ThemeSettingsActivity::class.java))
                             },

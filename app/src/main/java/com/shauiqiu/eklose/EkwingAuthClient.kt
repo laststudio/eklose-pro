@@ -167,7 +167,12 @@ class EkwingAuthClient(context: Context) {
         }
         val text = stream.use(::readText)
         if (connection.responseCode !in 200..299) {
-            throw RuntimeException("接口请求失败 ${connection.responseCode}：${text.take(200)}")
+            val message = "接口请求失败 ${connection.responseCode}：${text.take(200)}"
+            throw if (data.containsKey("token")) {
+                ekwingRequestError(message, connection.responseCode)
+            } else {
+                RuntimeException(message)
+            }
         }
         return try {
             JSONObject(text)
@@ -261,11 +266,14 @@ class EkwingAuthClient(context: Context) {
 object EkwingLoginStore {
     private const val PREFS_NAME = "ekwing_login"
     private const val KEY_SAVE_LOGIN = "save_login"
+    private const val KEY_AUTO_REFRESH_TOKEN = "auto_refresh_token"
     private const val KEY_BASIC_API = "basic_api"
     private const val KEY_ALL_PAGES = "all_pages"
     private const val KEY_FLOATING_NAVIGATION_BAR = "floating_navigation_bar"
     private const val KEY_FLOATING_NAVIGATION_BAR_GLASS = "floating_navigation_bar_glass"
     private const val KEY_NAVIGATION_RAIL_EXPANDED = "navigation_rail_expanded"
+    private const val KEY_NAVIGATION_BADGE_ENABLED = "navigation_badge_enabled"
+    private const val KEY_PREDICTIVE_BACK_ENABLED = "predictive_back_enabled"
     private const val KEY_COLOR_MODE = "color_mode"
     private const val KEY_PALETTE_STYLE = "palette_style"
     private const val KEY_COLOR_SPEC = "color_spec"
@@ -281,7 +289,7 @@ object EkwingLoginStore {
         identity: EkwingLoginIdentity,
     ) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val shouldSaveLogin = prefs.getBoolean(KEY_SAVE_LOGIN, false)
+        val shouldSaveLogin = prefs.getBoolean(KEY_SAVE_LOGIN, true)
         prefs.edit()
             .putString("uid", result.uid)
             .putString("token", result.token)
@@ -349,7 +357,19 @@ object EkwingLoginStore {
 
     fun shouldSaveLogin(context: Context): Boolean {
         return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .getBoolean(KEY_SAVE_LOGIN, false)
+            .getBoolean(KEY_SAVE_LOGIN, true)
+    }
+
+    fun shouldAutoRefreshToken(context: Context): Boolean {
+        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(KEY_AUTO_REFRESH_TOKEN, false)
+    }
+
+    fun setAutoRefreshToken(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_AUTO_REFRESH_TOKEN, enabled)
+            .apply()
     }
 
     fun setSaveLogin(context: Context, enabled: Boolean) {
@@ -473,6 +493,54 @@ object EkwingLoginStore {
             .edit()
             .putBoolean(KEY_BLUR_ENABLED, enabled)
             .apply()
+    }
+
+    fun navigationBadgeEnabled(context: Context): Boolean {
+        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(KEY_NAVIGATION_BADGE_ENABLED, true)
+    }
+
+    fun setNavigationBadgeEnabled(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_NAVIGATION_BADGE_ENABLED, enabled)
+            .apply()
+    }
+
+    fun observeNavigationBadgeEnabled(context: Context, onChanged: (Boolean) -> Unit): () -> Unit {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == KEY_NAVIGATION_BADGE_ENABLED || key == null) {
+                onChanged(prefs.getBoolean(KEY_NAVIGATION_BADGE_ENABLED, true))
+            }
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        onChanged(prefs.getBoolean(KEY_NAVIGATION_BADGE_ENABLED, true))
+        return { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+
+    fun predictiveBackEnabled(context: Context): Boolean {
+        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(KEY_PREDICTIVE_BACK_ENABLED, false)
+    }
+
+    fun setPredictiveBackEnabled(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_PREDICTIVE_BACK_ENABLED, enabled)
+            .apply()
+    }
+
+    fun observePredictiveBackEnabled(context: Context, onChanged: (Boolean) -> Unit): () -> Unit {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == KEY_PREDICTIVE_BACK_ENABLED || key == null) {
+                onChanged(prefs.getBoolean(KEY_PREDICTIVE_BACK_ENABLED, false))
+            }
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        onChanged(prefs.getBoolean(KEY_PREDICTIVE_BACK_ENABLED, false))
+        return { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
     }
 
     fun observeBlurEnabled(context: Context, onChanged: (Boolean) -> Unit): () -> Unit {

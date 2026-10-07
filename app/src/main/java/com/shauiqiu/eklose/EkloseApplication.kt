@@ -21,6 +21,10 @@ class EkloseApplication : Application() {
         super.onCreate()
         appContext = this
         AppIntegrityGuard.ensureIntegrity(this)
+        // Expire non-persistent sessions once per process start, not on Activity recreation.
+        if (!EkwingLoginStore.shouldSaveLogin(this)) {
+            EkwingLoginStore.clearSession(this)
+        }
         checkRemoteConfig()
     }
 

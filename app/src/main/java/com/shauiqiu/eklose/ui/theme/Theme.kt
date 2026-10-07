@@ -2,6 +2,8 @@ package com.shauiqiu.eklose.ui.theme
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -121,6 +123,28 @@ fun rememberEkloseBlurEnabled(): Boolean {
 }
 
 @Composable
+fun rememberEkloseNavigationBadgeEnabled(): Boolean {
+    val context = LocalContext.current.applicationContext
+    var enabled by remember(context) { mutableStateOf(EkwingLoginStore.navigationBadgeEnabled(context)) }
+    DisposableEffect(context) {
+        val stopObserving = EkwingLoginStore.observeNavigationBadgeEnabled(context) { enabled = it }
+        onDispose { stopObserving() }
+    }
+    return enabled
+}
+
+@Composable
+fun rememberEklosePredictiveBackEnabled(): Boolean {
+    val context = LocalContext.current.applicationContext
+    var enabled by remember(context) { mutableStateOf(EkwingLoginStore.predictiveBackEnabled(context)) }
+    DisposableEffect(context) {
+        val stopObserving = EkwingLoginStore.observePredictiveBackEnabled(context) { enabled = it }
+        onDispose { stopObserving() }
+    }
+    return enabled
+}
+
+@Composable
 fun rememberEkloseAccentColor(): EkloseAccentColor {
     val context = LocalContext.current.applicationContext
     var accentColor by remember(context) {
@@ -188,6 +212,14 @@ fun EkloseTheme(
     content: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
+    val activity = LocalActivity.current
+    val predictiveBackEnabled = rememberEklosePredictiveBackEnabled()
+    // A consuming BackHandler suppresses the platform's predictive animations.
+    // Disable it when opted in so Android can preview the previous Activity/home
+    // and handle gesture progress, cancellation and completion itself.
+    BackHandler(enabled = !predictiveBackEnabled && activity != null) {
+        activity?.finish()
+    }
     val systemDarkTheme = isSystemInDarkTheme()
     val paletteStyle = rememberEklosePaletteStyle()
     val colorSpec = rememberEkloseColorSpec()

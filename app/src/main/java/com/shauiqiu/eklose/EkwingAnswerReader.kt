@@ -300,7 +300,9 @@ object EkwingAnswerPrefetchManager {
         EkwingAnswerCacheStore.saveSourceState(context, source, EkwingAnswerState.sourceState(source))
 
         val sections = runCatching {
-            EkwingAnswerReader(context).readAnswerSections(source, paperKey)
+            EkwingTokenRefreshManager.withTokenRefresh(context) {
+                EkwingAnswerReader(context).readAnswerSections(source, paperKey)
+            }
         }.getOrElse { error ->
             if (error is CancellationException) throw error
             val failed = EkwingAnswerAssembler.readFailureSection(error)
@@ -518,7 +520,6 @@ class EkwingAnswerReader(private val context: Context) {
         val history = source.isHistory
         val isHomework = source.isHomework
         val session = EkwingLoginStore.loadSession(context)
-            ?: reloginWithSavedIdentity()
             ?: throw RuntimeException("请先登录翼课账号")
 
         val useBasic = EkwingLoginStore.useBasicApi(context)
@@ -593,7 +594,7 @@ class EkwingAnswerReader(private val context: Context) {
         if (cachedSections != null) {
             if (cachedReport == null) {
                 val examText = EkwingAnswerState.sourceState(source).taskByPaperKey[paperKey]
-                val task = examText?.let { runCatching { JSONObject(it) }.getOrNull() }
+                val task = examText?.let { ekwingReadAttempt { JSONObject(it) }.getOrNull() }
                 if (task != null) {
                     val report = extractClassScoreReport(task)
                     if (report != null) {
@@ -609,13 +610,12 @@ class EkwingAnswerReader(private val context: Context) {
 
         val examText = EkwingAnswerState.sourceState(source).taskByPaperKey[paperKey]
             ?: throw RuntimeException("未找到任务，请先读取任务列表")
-        val task = runCatching { JSONObject(examText) }
+        val task = ekwingReadAttempt { JSONObject(examText) }
             .getOrElse { throw RuntimeException("任务缓存无效，请重新读取列表") }
         val session = EkwingLoginStore.loadSession(context)
-            ?: reloginWithSavedIdentity()
             ?: throw RuntimeException("请先登录翼课账号")
         val useBasic = EkwingLoginStore.useBasicApi(context)
-        val sections = runCatching {
+        val sections = ekwingReadAttempt {
             if (source.isHomework) {
                 readHomeworkSections(session, task, useBasic, source = source, paperKey = paperKey)
             } else {
@@ -648,15 +648,8 @@ class EkwingAnswerReader(private val context: Context) {
         history: Boolean,
         allPages: Boolean,
     ): EkwingTaskList {
-        var actualSession = session
-        val data = runCatching {
-            getHomeworkListData(actualSession, useBasic, history, allPages)
-        }.recoverCatching { error ->
-            val refreshedSession = reloginWithSavedIdentity() ?: throw error
-            actualSession = EkwingSessionRefreshPlanner.actualSession(actualSession, refreshedSession)
-            getHomeworkListData(refreshedSession, useBasic, history, allPages)
-        }.getOrThrow()
-        return EkwingTaskList(actualSession, EkwingTaskListParser.homeworkListTasks(data))
+        val data = getHomeworkListData(session, useBasic, history, allPages)
+        return EkwingTaskList(session, EkwingTaskListParser.homeworkListTasks(data))
     }
 
     private fun getHomeworkListData(
@@ -701,29 +694,9 @@ class EkwingAnswerReader(private val context: Context) {
         history: Boolean,
         allPages: Boolean,
     ): EkwingTaskList {
-        var actualSession = session
-        val data = runCatching {
-            getExamListData(
-                session = actualSession,
-                useBasic = useBasic,
-                history = history,
-                allPages = allPages,
-            )
-        }.recoverCatching { error ->
-            val refreshedSession = reloginWithSavedIdentity() ?: throw error
-            actualSession = EkwingSessionRefreshPlanner.actualSession(
-                current = actualSession,
-                refreshed = refreshedSession,
-            )
-            getExamListData(
-                session = refreshedSession,
-                useBasic = useBasic,
-                history = history,
-                allPages = allPages,
-            )
-        }.getOrThrow()
+        val data = getExamListData(session, useBasic, history, allPages)
         return EkwingTaskList(
-            session = actualSession,
+            session = session,
             tasks = if (history) {
                 EkwingTaskListParser.examHistoryTasks(data)
             } else {
@@ -778,52 +751,6 @@ class EkwingAnswerReader(private val context: Context) {
         }
     }
 
-    private fun reloginWithSavedIdentity(): EkwingLoginSession? {
-        if (!EkwingLoginStore.shouldSaveLogin(context)) return null
-        val identity = EkwingLoginStore.loadIdentity(context)
-        val plan = EkwingReloginPlanner.plan(identity)
-        return when (plan) {
-            is EkwingReloginPlan.None -> null
-            is EkwingReloginPlan.Account -> {
-                saveReloginResult(
-                    result = EkwingAuthClient(context).loginByAccount(plan.username, plan.password),
-                    identity = identity,
-                    loginMethod = "account",
-                )
-            }
-            is EkwingReloginPlan.RealName -> {
-                saveReloginResult(
-                    result = EkwingAuthClient(context).loginByRealName(
-                        name = EkwingLoginStore.resolveRealName(context, plan.name),
-                        password = plan.password,
-                        schoolName = plan.schoolName,
-                        schoolId = plan.schoolId,
-                    ),
-                    identity = identity,
-                    loginMethod = "real-name",
-                )
-            }
-        }
-    }
-
-    private fun saveReloginResult(
-        result: EkwingLoginResult,
-        identity: EkwingLoginIdentity,
-        loginMethod: String,
-    ): EkwingLoginSession {
-        EkwingLoginStore.saveSession(
-            context = context,
-            result = result,
-            loginMethod = loginMethod,
-            identity = identity,
-        )
-        return EkwingLoginSession(
-            uid = result.uid,
-            token = result.token,
-            userType = result.userType,
-        )
-    }
-
     private fun readHomeworkSections(
         session: EkwingLoginSession,
         homework: JSONObject,
@@ -848,7 +775,7 @@ class EkwingAnswerReader(private val context: Context) {
 
         return detailItems.flatMapIndexed { index, item ->
             if (isExamPayload(item)) {
-                val examSections = runCatching {
+                val examSections = ekwingReadAttempt {
                     readExamSections(session, item, useBasic, source = source)
                 }.getOrNull()
                 if (!examSections.isNullOrEmpty()) {
@@ -898,14 +825,14 @@ class EkwingAnswerReader(private val context: Context) {
         paperKey: String? = null,
     ): List<EkwingAnswerSection> {
         val selfId = examSelfId(exam) ?: throw RuntimeException("选中的考试缺少 self_id")
-        val examItem = runCatching {
+        val examItem = ekwingReadAttempt {
             val request = EkwingHomeworkRequestPlanner.examItemRequest(
                 selfId = selfId,
                 commonParams = commonParams(session),
             )
             postForm(request.path, request.payload).opt("data")
         }.getOrNull()
-        val scoreInfo = runCatching {
+        val scoreInfo = ekwingReadAttempt {
             val request = EkwingHomeworkRequestPlanner.examScoreRequest(
                 exam = exam,
                 selfId = selfId,
@@ -977,7 +904,7 @@ class EkwingAnswerReader(private val context: Context) {
         var lastError: Throwable? = null
         val mergedItems = linkedMapOf<String, JSONObject>()
         paths.forEach { path ->
-            val items = runCatching {
+            val items = ekwingReadAttempt {
                 getDetailItemsFromPath(session, homework, path)
             }.onFailure { error ->
                 lastError = error
@@ -1032,14 +959,14 @@ class EkwingAnswerReader(private val context: Context) {
         homework: JSONObject,
         item: JSONObject,
     ): List<EkwingAnswerQuestion> {
-        return runCatching {
+        return ekwingReadAttempt {
             val request = EkwingHomeworkRequestPlanner.contentRequest(
                 homework = homework,
                 item = item,
                 commonParams = commonParams(session),
             )
             postForm(request.path, request.payload).opt("data")
-        }.recoverCatching {
+        }.recoverReadFailure {
             fetchItemUrlData(session, item)
         }.map { data ->
             parseContentQuestions(data)
@@ -1068,11 +995,14 @@ class EkwingAnswerReader(private val context: Context) {
             }
             val text = stream.use(::readText)
             if (connection.responseCode !in 200..299) {
-                throw RuntimeException("作业页面请求失败 ${connection.responseCode}：${text.take(160)}")
+                throw ekwingRequestError("作业页面请求失败 ${connection.responseCode}：${text.take(160)}", connection.responseCode)
             }
-            runCatching { JSONObject(text) }
-                .recoverCatching { JSONArray(text) }
-                .getOrDefault(text)
+            val body = ekwingReadAttempt { JSONObject(text) }.getOrNull()
+            if (body != null && body.optInt("status", 0) != 0) {
+                val error = ekwingRequestError(errorMessage(body))
+                if (error is EkwingTokenExpiredException) throw error
+            }
+            body ?: ekwingReadAttempt { JSONArray(text) }.getOrDefault(text)
         } finally {
             connection.disconnect()
         }
@@ -1089,7 +1019,7 @@ class EkwingAnswerReader(private val context: Context) {
             item = item,
             commonParams = commonParams(session),
         ).forEach { request ->
-            runCatching {
+            ekwingReadAttempt {
                 postForm(request.path, request.payload).opt("data")
             }.onSuccess { data ->
                 parseAnswerQuestions(data).forEach { question ->
@@ -1110,7 +1040,7 @@ class EkwingAnswerReader(private val context: Context) {
     ): JSONArray {
         val records = JSONArray()
         extractModelScoreRequests(scoreInfo).forEach { request ->
-            runCatching {
+            ekwingReadAttempt {
                 val payload = commonParams(session).toMutableMap()
                 queryParams(request.optString("url")).forEach { (key, value) ->
                     payload[key] = value
@@ -1145,7 +1075,7 @@ class EkwingAnswerReader(private val context: Context) {
             }
             val text = stream.use(::readText)
             if (connection.responseCode !in 200..299) {
-                throw RuntimeException("接口请求失败 ${connection.responseCode}：${text.take(160)}")
+                throw ekwingRequestError("接口请求失败 ${connection.responseCode}：${text.take(160)}", connection.responseCode)
             }
             parseScoreResponse(text)
         } finally {
@@ -1173,7 +1103,7 @@ class EkwingAnswerReader(private val context: Context) {
             }
             val text = stream.use(::readText)
             if (connection.responseCode !in 200..299) {
-                throw RuntimeException("接口请求失败 ${connection.responseCode}：${text.take(160)}")
+                throw ekwingRequestError("接口请求失败 ${connection.responseCode}：${text.take(160)}", connection.responseCode)
             }
             parseScoreResponse(text)
         } finally {
@@ -1182,10 +1112,10 @@ class EkwingAnswerReader(private val context: Context) {
     }
 
     private fun parseScoreResponse(text: String): Any? {
-        val body = runCatching { JSONObject(text) }.getOrNull()
+        val body = ekwingReadAttempt { JSONObject(text) }.getOrNull()
         if (body != null) {
             if (body.optInt("status", -1) != 0) {
-                throw RuntimeException(errorMessage(body))
+                throw ekwingRequestError(errorMessage(body))
             }
             return normalizeJson(body.opt("data").takeUnless { it == JSONObject.NULL })
         }
@@ -1272,12 +1202,12 @@ class EkwingAnswerReader(private val context: Context) {
             }
             val text = stream.use(::readText)
             if (connection.responseCode !in 200..299) {
-                throw RuntimeException("接口请求失败 ${connection.responseCode}：${text.take(160)}")
+                throw ekwingRequestError("接口请求失败 ${connection.responseCode}：${text.take(160)}", connection.responseCode)
             }
-            val body = runCatching { JSONObject(text) }
+            val body = ekwingReadAttempt { JSONObject(text) }
                 .getOrElse { throw RuntimeException("接口返回不是 JSON：${text.take(160)}") }
             if (body.optInt("status", -1) != 0) {
-                throw RuntimeException(errorMessage(body))
+                throw ekwingRequestError(errorMessage(body))
             }
             body
         } finally {

@@ -7,6 +7,14 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.background
@@ -82,6 +90,7 @@ import com.shauiqiu.eklose.ui.theme.EkloseTheme
 import com.shauiqiu.eklose.ui.theme.LocalEkloseCardSurface
 import com.shauiqiu.eklose.ui.theme.LocalEkloseIsDarkTheme
 import com.shauiqiu.eklose.ui.theme.LocalEklosePageBackground
+import com.shauiqiu.eklose.ui.theme.rememberEkloseNavigationBadgeEnabled
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import kotlinx.coroutines.Dispatchers
@@ -142,6 +151,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             EkloseTheme {
                 EkloseApp(openHomeRequest = openHomeRequest)
+                EkwingTokenRefreshDialog()
             }
         }
     }
@@ -265,13 +275,16 @@ private fun EkloseApp(openHomeRequest: Long = 0L) {
     val answerStates by EkwingAnswerState.states.collectAsState()
     val selectedSourceState = answerStates[selectedHomeworkScope.answerSource] ?: EkwingAnswerSourceState()
     val snackbarHostState = remember { SnackbarHostState() }
-    val readingBadge: (@Composable () -> Unit)? = if (readingSources.isNotEmpty()) {
+    val navigationBadgeEnabled = rememberEkloseNavigationBadgeEnabled()
+    // Count only the selected reading source, not all sources or in-flight operations.
+    val selectedPaperCount = selectedSourceState.papers.size
+    val readingBadge: (@Composable () -> Unit)? = if (navigationBadgeEnabled && selectedPaperCount > 0) {
         {
             Badge(
                 containerColor = MiuixTheme.colorScheme.primary,
                 contentColor = MiuixTheme.colorScheme.onPrimary,
             ) {
-                Text(readingSources.size.toString())
+                Text(selectedPaperCount.toString())
             }
         }
     } else {
@@ -357,11 +370,12 @@ private fun EkloseApp(openHomeRequest: Long = 0L) {
             val requestedScope = selectedHomeworkScope
             val requestedSource = requestedScope.answerSource
             if (requestedSource in readingSources) return
+            EkwingTokenRefreshManager.beginUserRead()
             readingSources += requestedSource
             readerSummary = "正在读取${requestedScope.label}..."
             scope.launch {
                 val message = try {
-                    val result = withContext(Dispatchers.IO) {
+                    val result = EkwingTokenRefreshManager.withTokenRefresh(context) {
                         EkwingAnswerReader(context).readPapers(source = requestedSource)
                     }
                     "已加载 ${result.size} 份${requestedScope.label}，正在后台解析答案"
@@ -828,6 +842,9 @@ private fun HomePage(
             )
         }
         item {
+            HomeInformationCard()
+        }
+        item {
             GroupSection(title = "公告与更新") {
                 GroupItem(
                     title = announcementTitle,
@@ -864,128 +881,155 @@ private fun EkloseActivationStatusCard(
     identityName: String?,
     onActivate: () -> Unit,
 ) {
-    if (session != null) {
-        // KernelSU's StatusCard verbatim: theme container colors under dynamic color,
-        // fixed brand-green surface in every other color mode.
-        val isDarkTheme = LocalEkloseIsDarkTheme.current
-        val isDynamicColor = MiuixTheme.isDynamicColor
-        val cardColor = when {
-            isDynamicColor -> MiuixTheme.colorScheme.secondaryContainer
-            isDarkTheme -> Color(0xFF1A3825)
-            else -> Color(0xFFDFFAE4)
-        }
-        val contentColor = when {
-            isDynamicColor -> MiuixTheme.colorScheme.onSecondaryContainer
-            isDarkTheme -> Color(0xFFB8E8C5)
-            else -> Color(0xFF164A29)
-        }
-        val iconTint = if (isDynamicColor) {
-            MiuixTheme.colorScheme.primary.copy(alpha = 0.8f)
-        } else {
-            Color(0xFF36D167)
-        }
+    val isDarkTheme = LocalEkloseIsDarkTheme.current
+    val isDynamicColor = MiuixTheme.isDynamicColor
+    // Preserve the existing KernelSU-derived endpoint colors.
+    val activeCardColor = when {
+        isDynamicColor -> MiuixTheme.colorScheme.secondaryContainer
+        isDarkTheme -> Color(0xFF1A3825)
+        else -> Color(0xFFDFFAE4)
+    }
+    val activeContentColor = when {
+        isDynamicColor -> MiuixTheme.colorScheme.onSecondaryContainer
+        isDarkTheme -> Color(0xFFB8E8C5)
+        else -> Color(0xFF164A29)
+    }
+    val cardColor by animateColorAsState(
+        targetValue = if (session != null) activeCardColor else MiuixTheme.colorScheme.errorContainer,
+        animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing),
+        label = "activationCardColor",
+    )
+    val contentColor by animateColorAsState(
+        targetValue = if (session != null) activeContentColor else MiuixTheme.colorScheme.onErrorContainer,
+        animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing),
+        label = "activationContentColor",
+    )
 
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(IntrinsicSize.Min),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+    AnimatedContent(
+        targetState = session to identityName,
+        modifier = Modifier.fillMaxWidth(),
+        contentAlignment = Alignment.TopStart,
+        contentKey = { (displayedSession, _) -> displayedSession != null },
+        transitionSpec = {
+            (fadeIn(tween(durationMillis = 220, delayMillis = 80)) togetherWith
+                fadeOut(tween(durationMillis = 100))).using(
+                // Keep the card's existing Tilt feedback from being clipped.
+                SizeTransform(clip = false) { _, _ ->
+                    tween(durationMillis = 320, easing = FastOutSlowInEasing)
+                },
+            )
+        },
+        label = "activationStatus",
+    ) { (displayedSession, displayedIdentityName) ->
+        if (displayedSession != null) {
+            val iconTint = if (isDynamicColor) {
+                MiuixTheme.colorScheme.primary.copy(alpha = 0.8f)
+            } else {
+                Color(0xFF36D167)
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(IntrinsicSize.Min),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.defaultColors(
+                        color = cardColor,
+                        contentColor = contentColor,
+                    ),
+                    showIndication = false,
+                    pressFeedbackType = PressFeedbackType.Tilt,
+                ) {
+                    // This deliberately follows KernelSU's StatusCard geometry: no invented
+                    // fixed card height, a 110dp status mark at bottom-right, and text overlays.
+                    Box {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .offset(27.dp, 31.dp),
+                            contentAlignment = Alignment.BottomEnd,
+                        ) {
+                            Icon(
+                                modifier = Modifier.size(110.dp),
+                                imageVector = Icons.Rounded.CheckCircleOutline,
+                                tint = iconTint,
+                                contentDescription = null,
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(16.dp, 14.dp),
+                            contentAlignment = Alignment.TopStart,
+                        ) {
+                            Column {
+                                Text(
+                                    text = "已激活",
+                                    fontSize = 22.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = contentColor,
+                                )
+                                Spacer(Modifier.height(1.dp))
+                                Text(
+                                    text = displayedIdentityName?.takeIf { it.isNotBlank() }
+                                        ?.let { "翼课账号：$it" }
+                                        ?: "uid=${displayedSession.uid}",
+                                    fontSize = 15.sp,
+                                    color = contentColor,
+                                )
+                            }
+                        }
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(16.dp, 10.dp),
+                            contentAlignment = Alignment.BottomStart,
+                        ) {
+                            Text(
+                                text = "可以开始读取考试和作业",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = contentColor,
+                            )
+                        }
+                    }
+                }
+            }
+        } else {
+            // Unlogged and unactivated are intentionally the same state. This is the compact
+            // KernelSU not-installed branch, not the large active StatusCard.
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.defaultColors(
                     color = cardColor,
                     contentColor = contentColor,
                 ),
-                showIndication = false,
+                onClick = onActivate,
+                showIndication = true,
                 pressFeedbackType = PressFeedbackType.Tilt,
             ) {
-                // This deliberately follows KernelSU's StatusCard geometry: no invented
-                // fixed card height, a 110dp status mark at bottom-right, and text overlays.
-                Box {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .offset(27.dp, 31.dp),
-                        contentAlignment = Alignment.BottomEnd,
-                    ) {
+                BasicComponent(
+                    title = "未激活",
+                    titleColor = BasicComponentDefaults.titleColor(
+                        color = contentColor,
+                    ),
+                    summary = "点击登录翼课账号",
+                    summaryColor = BasicComponentDefaults.summaryColor(
+                        color = contentColor,
+                    ),
+                    startAction = {
                         Icon(
-                            modifier = Modifier.size(110.dp),
-                            imageVector = Icons.Rounded.CheckCircleOutline,
-                            tint = iconTint,
-                            contentDescription = null,
+                            imageVector = Icons.Rounded.ErrorOutline,
+                            contentDescription = "未激活",
+                            modifier = Modifier.padding(end = 16.dp),
+                            tint = MiuixTheme.colorScheme.error,
                         )
-                    }
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(16.dp, 14.dp),
-                        contentAlignment = Alignment.TopStart,
-                    ) {
-                        Column {
-                            Text(
-                                text = "已激活",
-                                fontSize = 22.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = contentColor,
-                            )
-                            Spacer(Modifier.height(1.dp))
-                            Text(
-                                text = identityName?.takeIf { it.isNotBlank() }
-                                    ?.let { "翼课账号：$it" }
-                                    ?: "uid=${session.uid}",
-                                fontSize = 15.sp,
-                                color = contentColor,
-                            )
-                        }
-                    }
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(16.dp, 10.dp),
-                        contentAlignment = Alignment.BottomStart,
-                    ) {
-                        Text(
-                            text = "可以开始读取考试和作业",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = contentColor,
-                        )
-                    }
-                }
+                    },
+                )
             }
-        }
-    } else {
-        // Unlogged and unactivated are intentionally the same state. This is the compact
-        // KernelSU not-installed branch, not the large active StatusCard.
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.defaultColors(
-                color = MiuixTheme.colorScheme.errorContainer,
-                contentColor = MiuixTheme.colorScheme.onErrorContainer,
-            ),
-            onClick = onActivate,
-            showIndication = true,
-            pressFeedbackType = PressFeedbackType.Tilt,
-        ) {
-            BasicComponent(
-                title = "未激活",
-                titleColor = BasicComponentDefaults.titleColor(
-                    color = MiuixTheme.colorScheme.onErrorContainer,
-                ),
-                summary = "点击登录翼课账号",
-                summaryColor = BasicComponentDefaults.summaryColor(
-                    color = MiuixTheme.colorScheme.onErrorContainer,
-                ),
-                startAction = {
-                    Icon(
-                        imageVector = Icons.Rounded.ErrorOutline,
-                        contentDescription = "未激活",
-                        modifier = Modifier.padding(end = 16.dp),
-                        tint = MiuixTheme.colorScheme.error,
-                    )
-                },
-            )
         }
     }
 }

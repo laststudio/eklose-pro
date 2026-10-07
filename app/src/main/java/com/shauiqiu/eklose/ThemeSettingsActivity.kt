@@ -57,6 +57,8 @@ import com.shauiqiu.eklose.ui.theme.rememberEkloseBlurEnabled
 import com.shauiqiu.eklose.ui.theme.rememberEkloseColorMode
 import com.shauiqiu.eklose.ui.theme.rememberEkloseColorSpec
 import com.shauiqiu.eklose.ui.theme.rememberEklosePaletteStyle
+import com.shauiqiu.eklose.ui.theme.rememberEkloseNavigationBadgeEnabled
+import com.shauiqiu.eklose.ui.theme.rememberEklosePredictiveBackEnabled
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
@@ -64,7 +66,7 @@ import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.preference.SwitchPreference
-import top.yukonga.miuix.kmp.basic.TabRow
+import top.yukonga.miuix.kmp.basic.TabRowWithContour
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.blur.layerBackdrop
@@ -101,6 +103,8 @@ private fun ThemeSettingsScreen(onBack: () -> Unit) {
     val specValue = rememberEkloseColorSpec()
     val paletteValue = rememberEklosePaletteStyle()
     val blurValue = rememberEkloseBlurEnabled()
+    val navigationBadgeEnabled = rememberEkloseNavigationBadgeEnabled()
+    val predictiveBackEnabled = rememberEklosePredictiveBackEnabled()
     var colorMode by rememberSaveable { mutableStateOf(modeValue.storedValue) }
     var accentColor by rememberSaveable { mutableStateOf(accentValue.argb) }
     var colorSpec by rememberSaveable { mutableStateOf(specValue.value) }
@@ -185,7 +189,7 @@ private fun ThemeSettingsScreen(onBack: () -> Unit) {
                         colorSpec = runCatching { ColorSpec.SpecVersion.valueOf(colorSpec) }.getOrDefault(ColorSpec.SpecVersion.SPEC_2021),
                     )
                     Spacer(Modifier.height(36.dp))
-                    TabRow(
+                    TabRowWithContour(
                         tabs = listOf("跟随系统", "浅色", "深色"),
                         selectedTabIndex = selectedTab,
                         onTabSelected = setMode,
@@ -195,7 +199,6 @@ private fun ThemeSettingsScreen(onBack: () -> Unit) {
                     Card(modifier = Modifier.fillMaxWidth()) {
                         SwitchPreference(
                             title = "动态色彩",
-                            summary = "使用系统动态色彩生成主题",
                             checked = monet,
                             onCheckedChange = {
                                 val next = when {
@@ -246,8 +249,8 @@ private fun ThemeSettingsScreen(onBack: () -> Unit) {
                             },
                         )
                         SwitchPreference(
-                            title = "顶部栏背景模糊",
-                            summary = "使用 Miuix Blur",
+                            title = "模糊",
+                            summary = "启用顶栏和底栏的模糊效果",
                             checked = blurEnabled,
                             onCheckedChange = {
                                 blurEnabled = it
@@ -266,7 +269,7 @@ private fun ThemeSettingsScreen(onBack: () -> Unit) {
                         AnimatedVisibility(visible = floating) {
                             SwitchPreference(
                                 title = "液态玻璃",
-                                summary = "为悬浮底部栏启用 KernelSU 风格的液态玻璃效果",
+                                summary = "启用悬浮底栏的液态玻璃效果",
                                 checked = liquidGlass,
                                 onCheckedChange = {
                                     liquidGlass = it
@@ -274,6 +277,18 @@ private fun ThemeSettingsScreen(onBack: () -> Unit) {
                                 },
                             )
                         }
+                        SwitchPreference(
+                            title = "导航栏角标",
+                            summary = "在导航栏显示当前已读取到的作业数量",
+                            checked = navigationBadgeEnabled,
+                            onCheckedChange = { EkwingLoginStore.setNavigationBadgeEnabled(context, it) },
+                        )
+                        SwitchPreference(
+                            title = "预见性返回手势",
+                            summary = "启用对预见性返回手势的支持",
+                            checked = predictiveBackEnabled,
+                            onCheckedChange = { EkwingLoginStore.setPredictiveBackEnabled(context, it) },
+                        )
                     }
                 }
             }

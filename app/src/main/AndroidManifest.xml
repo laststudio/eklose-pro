@@ -2,10 +2,16 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Package visibility is limited to the Ekwing student app, not the full app list. -->
+    <queries>
+        <package android:name="com.ekwing.students" />
+    </queries>
+
     <uses-permission android:name="android.permission.INTERNET" />
 
     <application
         android:name=".EkloseApplication"
+        android:enableOnBackInvokedCallback="true"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
