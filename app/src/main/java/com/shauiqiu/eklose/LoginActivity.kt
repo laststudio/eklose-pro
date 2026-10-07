@@ -188,7 +188,7 @@ private fun LoginScreen(
                         OverlayDropdownPreference(
                             title = "登录模式",
                             summary = when (mode) {
-                                LoginMode.Account -> "使用 username 和密码登录"
+                                LoginMode.Account -> "使用账号和密码登录"
                                 LoginMode.RealName -> "使用姓名、学校和密码登录"
                             },
                             items = LoginMode.entries.map { it.title },
@@ -213,7 +213,7 @@ private fun LoginScreen(
                                     LoginField(
                                         value = username,
                                         onValueChange = { username = it },
-                                        label = "账号",
+                                        label = "翼课号/手机号/邮箱",
                                         errorText = statusText.takeIf { it == "请输入账号" },
                                     )
                                 } else {
