@@ -4,6 +4,16 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.MenuOpen
+import androidx.compose.material.icons.rounded.BlurOn
+import androidx.compose.material.icons.rounded.CallToAction
+import androidx.compose.material.icons.rounded.Colorize
+import androidx.compose.material.icons.rounded.DesignServices
+import androidx.compose.material.icons.rounded.Pin
+import androidx.compose.material.icons.rounded.Style
+import androidx.compose.material.icons.rounded.Wallpaper
+import androidx.compose.material.icons.rounded.WaterDrop
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -40,6 +50,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
@@ -199,6 +210,9 @@ private fun ThemeSettingsScreen(onBack: () -> Unit) {
                     Card(modifier = Modifier.fillMaxWidth()) {
                         SwitchPreference(
                             title = "动态色彩",
+                            startAction = {
+                                ThemePreferenceIcon(Icons.Rounded.Wallpaper, "动态色彩")
+                            },
                             checked = monet,
                             onCheckedChange = {
                                 val next = when {
@@ -217,6 +231,9 @@ private fun ThemeSettingsScreen(onBack: () -> Unit) {
                             Column {
                                 OverlayDropdownPreference(
                                     title = "主题色",
+                                    startAction = {
+                                        ThemePreferenceIcon(Icons.Rounded.Colorize, "主题色")
+                                    },
                                     items = EkloseAccentColor.entries.map { it.title },
                                     selectedIndex = EkloseAccentColor.entries.indexOfFirst { it.argb == accentColor }.coerceAtLeast(0),
                                     onSelectedIndexChange = {
@@ -226,6 +243,9 @@ private fun ThemeSettingsScreen(onBack: () -> Unit) {
                                 )
                                 OverlayDropdownPreference(
                                     title = "动态色板",
+                                    startAction = {
+                                        ThemePreferenceIcon(Icons.Rounded.Style, "动态色板")
+                                    },
                                     items = EklosePaletteStyle.entries.map { it.title },
                                     selectedIndex = EklosePaletteStyle.entries.indexOfFirst { it.value == paletteStyle }.coerceAtLeast(0),
                                     onSelectedIndexChange = {
@@ -241,6 +261,9 @@ private fun ThemeSettingsScreen(onBack: () -> Unit) {
                     Card(modifier = Modifier.fillMaxWidth()) {
                         OverlayDropdownPreference(
                             title = "颜色规范",
+                            startAction = {
+                                ThemePreferenceIcon(Icons.Rounded.DesignServices, "颜色规范")
+                            },
                             items = EkloseColorSpec.entries.map { it.title },
                             selectedIndex = EkloseColorSpec.entries.indexOfFirst { it.value == colorSpec }.coerceAtLeast(0),
                             onSelectedIndexChange = {
@@ -250,6 +273,9 @@ private fun ThemeSettingsScreen(onBack: () -> Unit) {
                         )
                         SwitchPreference(
                             title = "模糊",
+                            startAction = {
+                                ThemePreferenceIcon(Icons.Rounded.BlurOn, "模糊")
+                            },
                             summary = "启用顶栏和底栏的模糊效果",
                             checked = blurEnabled,
                             onCheckedChange = {
@@ -259,6 +285,9 @@ private fun ThemeSettingsScreen(onBack: () -> Unit) {
                         )
                         SwitchPreference(
                             title = "悬浮底部栏",
+                            startAction = {
+                                ThemePreferenceIcon(Icons.Rounded.CallToAction, "悬浮底部栏")
+                            },
                             summary = "使用 Apple 风格的悬浮底部栏",
                             checked = floating,
                             onCheckedChange = {
@@ -269,6 +298,9 @@ private fun ThemeSettingsScreen(onBack: () -> Unit) {
                         AnimatedVisibility(visible = floating) {
                             SwitchPreference(
                                 title = "液态玻璃",
+                                startAction = {
+                                    ThemePreferenceIcon(Icons.Rounded.WaterDrop, "液态玻璃")
+                                },
                                 summary = "启用悬浮底栏的液态玻璃效果",
                                 checked = liquidGlass,
                                 onCheckedChange = {
@@ -279,12 +311,18 @@ private fun ThemeSettingsScreen(onBack: () -> Unit) {
                         }
                         SwitchPreference(
                             title = "导航栏角标",
+                            startAction = {
+                                ThemePreferenceIcon(Icons.Rounded.Pin, "导航栏角标")
+                            },
                             summary = "在导航栏显示当前已读取到的作业数量",
                             checked = navigationBadgeEnabled,
                             onCheckedChange = { EkwingLoginStore.setNavigationBadgeEnabled(context, it) },
                         )
                         SwitchPreference(
                             title = "预见性返回手势",
+                            startAction = {
+                                ThemePreferenceIcon(Icons.AutoMirrored.Rounded.MenuOpen, "预见性返回手势")
+                            },
                             summary = "启用对预见性返回手势的支持",
                             checked = predictiveBackEnabled,
                             onCheckedChange = { EkwingLoginStore.setPredictiveBackEnabled(context, it) },
@@ -294,6 +332,16 @@ private fun ThemeSettingsScreen(onBack: () -> Unit) {
             }
         }
     }
+}
+
+@Composable
+private fun ThemePreferenceIcon(icon: ImageVector, description: String) {
+    Icon(
+        imageVector = icon,
+        contentDescription = description,
+        modifier = Modifier.padding(end = 6.dp).size(24.dp),
+        tint = MiuixTheme.colorScheme.onBackground,
+    )
 }
 
 @Suppress("ConfigurationScreenWidthHeight")
