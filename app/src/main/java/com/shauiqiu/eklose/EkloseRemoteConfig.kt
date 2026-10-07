@@ -53,18 +53,12 @@ data class EkloseRemoteStatus(
 object EkloseRemoteConfigManager {
     private const val TAG = "EkloseRemoteConfig"
     private const val TIMEOUT_MS = 5000L
-    private const val CONFIG_FILE = "eklose_config.json"
     private const val BACKEND_CONFIG_URL = "https://api.lastudio.cc/software/eklose/config"
 
     /** 当前端版本号，供后端按版本下发差异化配置（per-release 弹窗/功能开关）。 */
     @Volatile
     private var currentVersionCodeForQuery: Long = 0L
 
-    private val CONFIG_URLS = listOf(
-        BACKEND_CONFIG_URL,
-        "https://raw.giteeusercontent.com/qiuqiqiuqid/fe_config/raw/master/$CONFIG_FILE",
-        "https://raw.githubusercontent.com/laststudio/Fe_config/main/$CONFIG_FILE",
-    )
     private const val DEFAULT_CHANGELOG_URL =
         "https://api.lastudio.cc/software/eklose/changelog"
 
@@ -153,29 +147,27 @@ object EkloseRemoteConfigManager {
     }
 
     private suspend fun fetchFirstAvailableConfig(): String {
-        val errors = mutableListOf<String>()
-        for (configUrl in CONFIG_URLS) {
-            try {
-                val requestUrl = if (configUrl == BACKEND_CONFIG_URL && currentVersionCodeForQuery > 0) {
-                    "$configUrl?version_code=$currentVersionCodeForQuery"
-                } else {
-                    configUrl
-                }
-                Log.d(TAG, "尝试远程配置: $requestUrl")
-                val response = withTimeoutOrNull(TIMEOUT_MS) {
-                    val connection = URL(requestUrl).openConnection() as URLConnection
-                    connection.connectTimeout = TIMEOUT_MS.toInt()
-                    connection.readTimeout = TIMEOUT_MS.toInt()
-                    connection.getInputStream().bufferedReader().use { it.readText() }
-                }
-                if (!response.isNullOrBlank()) return response
-                errors += "$configUrl: empty or timeout"
-            } catch (error: Exception) {
-                errors += "$configUrl: ${error.javaClass.simpleName}: ${error.message}"
-                Log.w(TAG, "配置源失败: $configUrl", error)
-            }
+        val requestUrl = if (currentVersionCodeForQuery > 0) {
+            "$BACKEND_CONFIG_URL?version_code=$currentVersionCodeForQuery"
+        } else {
+            BACKEND_CONFIG_URL
         }
-        throw NetworkException("所有远程配置源均失败: ${errors.joinToString(" | ")}")
+        Log.d(TAG, "请求远程配置: $requestUrl")
+        try {
+            val response = withTimeoutOrNull(TIMEOUT_MS) {
+                val connection = URL(requestUrl).openConnection() as URLConnection
+                connection.connectTimeout = TIMEOUT_MS.toInt()
+                connection.readTimeout = TIMEOUT_MS.toInt()
+                connection.getInputStream().bufferedReader().use { it.readText() }
+            }
+            if (!response.isNullOrBlank()) return response
+            throw NetworkException("远程配置返回为空或超时: $requestUrl")
+        } catch (error: NetworkException) {
+            throw error
+        } catch (error: Exception) {
+            Log.w(TAG, "远程配置请求失败: $requestUrl", error)
+            throw NetworkException("远程配置请求失败: $requestUrl (${error.javaClass.simpleName}: ${error.message})")
+        }
     }
 
     private fun EkloseRemoteConfig.toStatus(
